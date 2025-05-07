@@ -1,0 +1,18 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"command": "dotnet",
+			"label": "build",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/src/MigrondiUI/MigrondiUI.fsproj",
+				"/consoleloggerparameters:NoSummary"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+		}
+	]
+}
