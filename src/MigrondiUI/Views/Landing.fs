@@ -34,13 +34,13 @@ type LandingViewState =
 [<Struct>]
 type ViewContentProps = {
   viewState: LandingViewState aval
-  projects: Project list aval
+  projects: LocalProject list aval
   handleProjectSelected: Project -> unit
   handleSelectLocalProject: unit -> unit
   handleCreateNewLocalProject: unit -> unit
 }
 
-type LandingVM(logger: ILogger<LandingVM>, projects: IProjectRepository) =
+type LandingVM(logger: ILogger<LandingVM>, projects: ILocalProjectRepository) =
 
   let _projects = cval []
 
@@ -48,7 +48,7 @@ type LandingVM(logger: ILogger<LandingVM>, projects: IProjectRepository) =
 
   do logger.LogDebug "LandingVM created"
 
-  member _.Projects: Project list aval = _projects
+  member _.Projects: LocalProject list aval = _projects
 
   member _.LoadProjects() = async {
     let! projects = projects.GetProjects()
@@ -95,7 +95,7 @@ type LandingVM(logger: ILogger<LandingVM>, projects: IProjectRepository) =
         logger.LogDebug("Selected file: {File}", file.Name)
 
         let! pid =
-          projects.InsertLocalProject(
+          projects.InsertProject(
             parentFolder.Name,
             // TODO: handle uris when we're not on desktop platforms
             configPath = file.Path.LocalPath
@@ -172,7 +172,7 @@ type LandingVM(logger: ILogger<LandingVM>, projects: IProjectRepository) =
 
         let configPath = Path.Combine(directory, "migrondi.json")
 
-        let! pid = projects.InsertLocalProject(dirName, configPath = configPath)
+        let! pid = projects.InsertProject(dirName, configPath = configPath)
 
         logger.LogDebug("Inserted local project with id {Id}", pid)
         return ValueSome pid
@@ -185,20 +185,23 @@ let inline emptyProjectsView() : Control =
     .Margin(5)
     .OrientationVertical()
 
-let repositoryList onProjectSelected (projects: Project list aval) : Control =
+let repositoryList
+  onProjectSelected
+  (projects: LocalProject list aval)
+  : Control =
   let repositoryItem =
-    FuncDataTemplate<Project>(fun project _ ->
+    FuncDataTemplate<LocalProject>(fun project _ ->
       StackPanel()
-        .Tag(project.Id)
+        .Tag(project.id)
         .Children(
-          TextBlock().Text project.Name,
-          TextBlock().Text(defaultArg project.Description "No description")
+          TextBlock().Text project.name,
+          TextBlock().Text(defaultArg project.description "No description")
         )
         .Spacing(5)
         .Margin(5)
         .OrientationVertical())
 
-  let projectsListBox(projects: Project list) =
+  let projectsListBox(projects: LocalProject list) =
 
     ListBox()
       .ItemsSource(projects)

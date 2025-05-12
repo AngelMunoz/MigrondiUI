@@ -482,7 +482,7 @@ let View
   (
     logger: ILogger<LocalProjectDetailsVM>,
     mLogger: ILogger<IMigrondi>,
-    projects: IProjectRepository
+    projects: ILocalProjectRepository
   )
   (context: RouteContext)
   (nav: INavigable<Control>)
@@ -492,7 +492,7 @@ let View
       let! project = projects.GetProjectById projectId
 
       match project with
-      | Some(Local project) -> return Some project
+      | Some project -> return Some project
       | _ ->
         logger.LogWarning(
           "We're not supposed to have a virtual project here. Project ID: {projectId}",

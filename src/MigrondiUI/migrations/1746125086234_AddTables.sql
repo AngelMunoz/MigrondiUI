@@ -26,7 +26,7 @@ create table if not exists "virtual_projects"(
 );
 
 create table if not exists "migrations"(
-    "id" integer primary key,
+    "id" text primary key,
     "name" text not null,
     "timestamp" integer not null,
     "up_content" text not null,

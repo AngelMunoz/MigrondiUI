@@ -1,20 +1,33 @@
 module MigrondiUI.Projects
 
 open System
-open System.Data
 open System.IO
-open System.Text.Json
-open System.Threading.Tasks
 
 open FsToolkit.ErrorHandling
 open Migrondi.Core
 
+open IcedTasks
 
-type IProjectRepository =
-  abstract member GetProjects: unit -> Task<Project list>
-  abstract member GetProjectById: Guid -> Task<Project option>
+type IVirtualProjectRepository =
+  abstract member GetProjects: unit -> CancellableTask<VirtualProject list>
+  abstract member GetProjectById: Guid -> CancellableTask<VirtualProject option>
 
-  abstract member InsertVirtualProject: project: VirtualProject -> Task<unit>
+  abstract member InsertProject: VirtualProject -> CancellableTask<unit>
+  abstract member UpdateProject: VirtualProject -> CancellableTask<unit>
+
+  abstract member InsertMigration: VirtualMigration -> CancellableTask<unit>
+  abstract member UpdateMigration: VirtualMigration -> CancellableTask<unit>
+  abstract member RemoveMigration: Guid -> CancellableTask<unit>
+
+  abstract member GetMigrations: Guid -> CancellableTask<VirtualMigration list>
+
+
+  abstract member GetMigrationByName:
+    string -> CancellableTask<VirtualMigration option>
+
+type ILocalProjectRepository =
+  abstract member GetProjects: unit -> CancellableTask<LocalProject list>
+  abstract member GetProjectById: Guid -> CancellableTask<LocalProject option>
 
   /// <summary>
   /// Inserts a local project into the database.
@@ -23,13 +36,14 @@ type IProjectRepository =
   /// <param name="configPath">The path to the project configuration file. (migrondi.json)</param>
   /// <param name="description">An optional description of the project.</param>
   /// <returns>The ID of the inserted project.</returns>
-  abstract member InsertLocalProject:
-    name: string * configPath: string * ?description: string -> Task<Guid>
+  abstract member InsertProject:
+    name: string * configPath: string * ?description: string ->
+      CancellableTask<Guid>
 
-  abstract member UpdateProject: Project -> Task<unit>
+  abstract member UpdateProject: LocalProject -> CancellableTask<unit>
 
-  abstract member UpdateLocalProjectConfigPath:
-    id: Guid * path: string -> Task<unit>
+  abstract member UpdateProjectConfigPath:
+    id: Guid * path: string -> CancellableTask<unit>
 
 let GetRepository createDbConnection =
   let readConfig(path: string) = option {
@@ -56,44 +70,37 @@ let GetRepository createDbConnection =
   let updateLocalProjectConfigPath =
     Database.UpdateLocalProjectConfigPath createDbConnection
 
-  { new IProjectRepository with
+  { new ILocalProjectRepository with
 
-      member _.GetProjectById projectId = task {
-        let! project = findLocalProjectById projectId
-
-        match project with
-        | Some project -> return Some(Local project)
-        | None ->
-          // TODO: try find virtual project once these are implemented
-          return None
+      member _.GetProjectById projectId = cancellableTask {
+        let! token = CancellableTask.getCancellationToken()
+        return! findLocalProjectById(projectId, Some token)
       }
 
-      member _.GetProjects() = task {
-        let! projects = findLocalProjects()
-        // TODO: try find virtual projects once these are implemented
-        let virtualProjects = []
-
-        return [
-          for project in projects do
-            Local project
-
-          for project in virtualProjects do
-            Virtual project
-        ]
+      member _.GetProjects() = cancellableTask {
+        let! token = CancellableTask.getCancellationToken()
+        return! findLocalProjects(Some token)
       }
 
-      member _.InsertVirtualProject _ = failwith "Not Implemented"
-
-      member _.InsertLocalProject(name, path, description) =
-        insertLocalProject(name, description, path)
-
-      member _.UpdateProject arg1 = task {
-        match arg1 with
-        | Local project ->
-          do! updateProject(project.id, project.name, project.description)
-        | Virtual v -> failwith "Not Implemented"
+      member _.InsertProject(name, path, description) = cancellableTask {
+        let! token = CancellableTask.getCancellationToken()
+        return! insertLocalProject(name, description, path, Some token)
       }
 
-      member _.UpdateLocalProjectConfigPath(id, path) =
-        updateLocalProjectConfigPath(id, path)
+      member _.UpdateProject project = cancellableTask {
+        let! token = CancellableTask.getCancellationToken()
+
+        return!
+          updateProject(
+            project.id,
+            project.name,
+            project.description,
+            Some token
+          )
+      }
+
+      member _.UpdateProjectConfigPath(id, path) = cancellableTask {
+        let! token = CancellableTask.getCancellationToken()
+        return! updateLocalProjectConfigPath(id, path, Some token)
+      }
   }

@@ -21,6 +21,16 @@ type VirtualProject = {
   driver: MigrondiDriver
 }
 
+type VirtualMigration = {
+  id: Guid
+  name: string
+  timestamp: int64
+  upContent: string
+  downContent: string
+  projectId: Guid
+  manualTransaction: bool
+}
+
 type Project =
   | Local of LocalProject
   | Virtual of VirtualProject

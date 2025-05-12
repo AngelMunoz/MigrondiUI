@@ -2,6 +2,7 @@ namespace MigrondiUI
 
 open System
 open System.Data
+open System.Threading
 open Donald
 
 module Queries =
@@ -80,41 +81,58 @@ module Mappers =
 module Database =
   open Microsoft.Data.Sqlite
 
+  let inline setCancellationToken
+    (cancellationToken: CancellationToken option)
+    (dbUnit: DbUnit)
+    =
+    match cancellationToken with
+    | Some token -> Db.setCancellationToken token dbUnit
+    | None -> dbUnit
+
   let ConnectionFactory() : IDbConnection =
     let dbPath = System.IO.Path.Combine(AppContext.BaseDirectory, "migrondi.db")
     let connectionString = $"Data Source={dbPath};"
     new SqliteConnection(connectionString)
 
   let FindLocalProjects(readConfig, createDbConnection: unit -> IDbConnection) =
-    fun () ->
+    fun cts ->
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
       connection
       |> Db.newCommand Queries.GetLocalProjects
+      |> setCancellationToken cts
       |> Db.Async.query(Mappers.mapLocalProject readConfig)
 
   let FindLocalProjectById
     (readConfig, createDbConnection: unit -> IDbConnection)
     =
-    fun (projectId: Guid) ->
+    fun (projectId: Guid, cts) ->
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
       connection
       |> Db.newCommand Queries.GetLocalProjectById
+      |> setCancellationToken cts
       |> Db.setParams [ "id", sqlString projectId ]
       |> Db.Async.querySingle(Mappers.mapLocalProject readConfig)
 
   let InsertLocalProject(createDbConnection: unit -> IDbConnection) =
-    fun (name: string, description: string option, configPath: string) -> task {
+    fun (name: string, description: string option, configPath: string, cts) -> task {
       use connection = createDbConnection()
       connection.TryOpenConnection()
       let projectId = Guid.NewGuid()
 
+      use! trx =
+        connection.TryBeginTransactionAsync(
+          defaultArg cts CancellationToken.None
+        )
+
       do!
         connection
         |> Db.newCommand Queries.InsertProject
+        |> Db.setTransaction trx
+        |> setCancellationToken cts
         |> Db.setParams [
           "id", sqlString projectId
           "name", sqlString name
@@ -125,6 +143,8 @@ module Database =
       do!
         connection
         |> Db.newCommand Queries.InsertLocalProject
+        |> Db.setTransaction trx
+        |> setCancellationToken cts
         |> Db.setParams [
           "id", sqlString(Guid.NewGuid())
           "config_path", sqlString configPath
@@ -132,16 +152,18 @@ module Database =
         ]
         |> Db.Async.exec
 
+      do! trx.TryCommitAsync(defaultArg cts CancellationToken.None)
       return projectId
     }
 
   let UpdateProject(createDbConnection: unit -> IDbConnection) =
-    fun (id: Guid, name: string, description: string option) ->
+    fun (id: Guid, name: string, description: string option, cts) ->
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
       connection
       |> Db.newCommand Queries.UpdateProjectQuery
+      |> setCancellationToken cts
       |> Db.setParams [
         "id", sqlString id
         "name", sqlString name
@@ -150,12 +172,13 @@ module Database =
       |> Db.Async.exec
 
   let UpdateLocalProjectConfigPath(createDbConnection: unit -> IDbConnection) =
-    fun (projectId: Guid, configPath: string) ->
+    fun (projectId: Guid, configPath: string, cts) ->
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
       connection
       |> Db.newCommand Queries.UpdateLocalProjectConfigPathQuery
+      |> setCancellationToken cts
       |> Db.setParams [
         "project_id", sqlString projectId
         "config_path", sqlString configPath
