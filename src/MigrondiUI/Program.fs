@@ -36,12 +36,13 @@ let BuildMainWindow router =
   win
 
 let Orchestrate() =
-
+  // This is for the current application's database
+  // each project is dealt accordingly
   Migrations.GetMigrondi loggerFactory
   |> ValueOption.defaultWith(fun () -> failwith "No migrondi found")
   |> Migrations.Migrate
 
-  Projects.GetRepository Database.ConnectionFactory
+  Projects.GetRepositories Database.ConnectionFactory
   |> Views.Routes.GetRouter loggerFactory
   |> BuildMainWindow
 

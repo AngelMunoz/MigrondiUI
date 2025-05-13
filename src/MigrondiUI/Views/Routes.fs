@@ -11,42 +11,39 @@ open Navs.Avalonia
 
 
 
-let private landingViewWithVM(lf: ILoggerFactory, projects) =
+let private landingViewWithVM(lf: ILoggerFactory, lProjects) =
   let logger = lf.CreateLogger<Landing.LandingVM>()
-  Landing.View(Landing.LandingVM(logger, projects), logger)
+  Landing.View(Landing.LandingVM(logger, lProjects), logger)
 
 let private projectDetailsViewWithVM(lf: ILoggerFactory, projects) =
   let logger = lf.CreateLogger<LocalProjectDetails.LocalProjectDetailsVM>()
   let mLogger = lf.CreateLogger<Migrondi.Core.IMigrondi>()
   LocalProjectDetails.View(logger, mLogger, projects)
 
-let private vProjectDetailsViewWithVM() =
+let private vProjectDetailsViewWithVM(lf: ILoggerFactory, vProjects) =
   fun (_: RouteContext) (_: INavigable<_>) ->
     TextBlock().Text("Virtual project details view not implemented yet")
 
 
-let GetRouter lf projects =
+let GetRouter lf (lProjects, vProjects) =
 
   let router: IRouter<_> =
     AvaloniaRouter [
-      Route.define("landing", "/", landingViewWithVM(lf, projects))
+      Route.define("landing", "/", landingViewWithVM(lf, lProjects))
       Route.define(
         "local-project-details",
         "/projects/local/:projectId<guid>",
-        projectDetailsViewWithVM(lf, projects)
+        projectDetailsViewWithVM(lf, lProjects)
       )
       |> Route.cache NoCache
       Route.define(
         "virtual-project-details",
         "/projects/virtual/:projectId<guid>",
-        vProjectDetailsViewWithVM()
+        vProjectDetailsViewWithVM(lf, vProjects)
       )
       |> Route.cache NoCache
     ]
 
-  router.Navigate("/")
-  |> Async.AwaitTask
-  |> Async.Ignore
-  |> Async.StartImmediate
+  router.Navigate "/" |> Async.AwaitTask |> Async.Ignore |> Async.StartImmediate
 
   router

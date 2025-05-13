@@ -13,12 +13,12 @@ type IVirtualProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<VirtualProject list>
   abstract member GetProjectById: Guid -> CancellableTask<VirtualProject option>
 
-  abstract member InsertProject: VirtualProject -> CancellableTask<unit>
+  abstract member InsertProject: VirtualProject -> CancellableTask<Guid>
   abstract member UpdateProject: VirtualProject -> CancellableTask<unit>
 
-  abstract member InsertMigration: VirtualMigration -> CancellableTask<unit>
+  abstract member InsertMigration: VirtualMigration -> CancellableTask<Guid>
   abstract member UpdateMigration: VirtualMigration -> CancellableTask<unit>
-  abstract member RemoveMigration: Guid -> CancellableTask<unit>
+  abstract member RemoveMigrationByName: string -> CancellableTask<unit>
 
   abstract member GetMigrations: Guid -> CancellableTask<VirtualMigration list>
 
@@ -46,7 +46,7 @@ type ILocalProjectRepository =
   abstract member UpdateProjectConfigPath:
     id: Guid * path: string -> CancellableTask<unit>
 
-let GetRepository createDbConnection =
+let GetLocalProjectRepository createDbConnection =
   let readConfig(path: string) = option {
     try
 
@@ -94,3 +94,91 @@ let GetRepository createDbConnection =
       member _.UpdateProjectConfigPath(id, path) =
         updateLocalProjectConfigPath(id, path)
   }
+
+let GetVirtualProjectRepository createDbConnection =
+  let findVirtualProjects = Database.FindVirtualProjects createDbConnection
+
+  let findVirtualProjectById =
+    Database.FindVirtualProjectById createDbConnection
+
+  let insertVirtualProject = Database.InsertVirtualProject createDbConnection
+  let updateVirtualProject = Database.UpdateVirtualProject createDbConnection
+  let updateProject = Database.UpdateProject createDbConnection
+
+  let findVirtualMigrationByName =
+    Database.FindVirtualMigrationByName createDbConnection
+
+  let findVirtualMigrationsByProjectId =
+    Database.FindVirtualMigrationsByProjectId createDbConnection
+
+  let insertVirtualMigration =
+    Database.InsertVirtualMigration createDbConnection
+
+  let updateVirtualMigration =
+    Database.UpdateVirtualMigration createDbConnection
+
+  let removeVirtualMigrationByName =
+    Database.RemoveVirtualMigrationByName createDbConnection
+
+  { new IVirtualProjectRepository with
+      member _.GetProjects() = findVirtualProjects()
+
+      member _.GetProjectById projectId = findVirtualProjectById projectId
+
+      member _.InsertProject project =
+        insertVirtualProject {
+          name = project.name
+          description = project.description
+          connection = project.connection
+          tableName = project.tableName
+          driver = project.driver.AsString
+        }
+
+      member _.UpdateProject project = cancellableTask {
+        // First update the base project information
+        do!
+          updateProject {
+            id = project.id
+            name = project.name
+            description = project.description
+          }
+
+        return!
+          updateVirtualProject {
+            projectId = project.id
+            connection = project.connection
+            tableName = project.tableName
+            driver = project.driver.AsString
+          }
+      }
+
+      member _.InsertMigration migration =
+        insertVirtualMigration {
+          name = migration.name
+          timestamp = migration.timestamp
+          upContent = migration.upContent
+          downContent = migration.downContent
+          virtualProjectId = migration.projectId
+          manualTransaction = migration.manualTransaction
+        }
+
+      member _.UpdateMigration migration =
+        updateVirtualMigration {
+          name = migration.name
+          upContent = migration.upContent
+          downContent = migration.downContent
+          manualTransaction = migration.manualTransaction
+        }
+
+      member _.RemoveMigrationByName migrationName =
+        removeVirtualMigrationByName migrationName
+
+      member _.GetMigrations projectId =
+        findVirtualMigrationsByProjectId projectId
+
+      member _.GetMigrationByName name = findVirtualMigrationByName name
+  }
+
+let inline GetRepositories createDbConnection =
+  GetLocalProjectRepository createDbConnection,
+  GetVirtualProjectRepository createDbConnection

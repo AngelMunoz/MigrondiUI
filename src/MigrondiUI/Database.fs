@@ -170,6 +170,13 @@ module Queries =
     values (@id, @name, @timestamp, @up_content, @down_content, @virtual_project_id, @manual_transaction);
     """
 
+  [<Literal>]
+  let RemoveVirtualMigrationByName =
+    """
+    delete from virtual_migrations
+    where name = @name;
+    """
+
 module Mappers =
   open Migrondi.Core
 
@@ -550,4 +557,18 @@ module Database =
         |> Db.Async.exec
 
       return migrationId
+    }
+
+  let RemoveVirtualMigrationByName(createDbConnection: unit -> IDbConnection) =
+    fun (name: string) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+
+      return!
+        connection
+        |> Db.newCommand Queries.RemoveVirtualMigrationByName
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "name", sqlString name ]
+        |> Db.Async.exec
     }
