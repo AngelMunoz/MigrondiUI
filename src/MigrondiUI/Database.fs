@@ -11,29 +11,13 @@ module Queries =
   [<Literal>]
   let GetLocalProjects =
     """
-      select
-        p.id as id, p.name as name, p.description  [<Struct>]
-  type UpdateVirtualMigrationArgs = {
-    name: string
-    up_content: string
-    down_content: string
-    manual_transaction: bool
-  }
-
-  [<Struct>]
-  type InsertVirtualMigrationArgs = {
-    name: string
-    timestamp: int64
-    up_content: string
-    down_content: string
-    virtual_project_id: Guid
-    manual_transaction: bool
-  }lp.config_path as config_path
-      from projects as p
-      left join local_projects as lp
-        on
-        lp.project_id = p.id;
-      """
+    select
+      p.id as id, p.name as name, p.description as description, lp.config_path as config_path
+    from projects as p
+    left join local_projects as lp
+      on
+      lp.project_id = p.id;
+    """
 
   [<Literal>]
   let GetLocalProjectById =
