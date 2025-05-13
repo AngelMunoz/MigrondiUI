@@ -187,21 +187,13 @@ module Mappers =
     let tableName = r.ReadString "table_name"
     let driverStr = r.ReadString "driver"
 
-    let driver =
-      match driverStr with
-      | "mysql" -> MigrondiDriver.Mysql
-      | "postgres" -> MigrondiDriver.Postgresql
-      | "mssql" -> MigrondiDriver.Mssql
-      | "sqlite" -> MigrondiDriver.Sqlite
-      | _ -> MigrondiDriver.Sqlite // Default to SQLite if driver is unknown
-
     {
       id = id
       name = name
       description = description
       connection = connection
       tableName = tableName
-      driver = driver
+      driver = MigrondiDriver.FromString driverStr
       migrations = Guid.NewGuid() // Using a new GUID as placeholder, adjust as needed for your actual data model
     }
 
@@ -285,7 +277,8 @@ module Database =
     fun () -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -300,7 +293,8 @@ module Database =
     fun (projectId: Guid) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -314,7 +308,9 @@ module Database =
     fun (args: InsertLocalProjectArgs) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
+
       let projectId = Guid.NewGuid()
 
       use! trx = connection.TryBeginTransactionAsync(ct)
@@ -351,7 +347,8 @@ module Database =
     fun (args: UpdateProjectArgs) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -369,7 +366,8 @@ module Database =
     fun (projectId: Guid, configPath: string) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -387,7 +385,8 @@ module Database =
     fun () -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -400,7 +399,8 @@ module Database =
     fun (projectId: Guid) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -414,7 +414,9 @@ module Database =
     fun (args: InsertVirtualProjectArgs) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
+
       let projectId = Guid.NewGuid()
 
       use! trx = connection.TryBeginTransactionAsync(ct)
@@ -453,7 +455,8 @@ module Database =
     fun (args: UpdateVirtualProjectArgs) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use dbConnection = createDbConnection()
-      dbConnection.TryOpenConnection()
+
+      do! dbConnection.TryOpenConnectionAsync(ct)
 
       return!
         dbConnection
@@ -473,7 +476,8 @@ module Database =
     fun (name: string) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -489,7 +493,8 @@ module Database =
     fun (projectId: Guid) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -503,7 +508,8 @@ module Database =
     fun (args: UpdateVirtualMigrationArgs) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
@@ -522,7 +528,9 @@ module Database =
     fun (args: InsertVirtualMigrationArgs) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
+
       let migrationId = Guid.NewGuid()
 
       do!
@@ -547,7 +555,8 @@ module Database =
     fun (name: string) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
-      connection.TryOpenConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
 
       return!
         connection
