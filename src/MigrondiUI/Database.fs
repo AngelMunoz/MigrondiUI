@@ -6,16 +6,19 @@ open System.Threading
 open Donald
 
 module Queries =
+
+  let inline sql(value: string) = value
+
   [<Literal>]
   let GetLocalProjects =
     """
-    select
-      p.id as id, p.name as name, p.description as description, lp.config_path as config_path
-    from projects as p
-    left join local_projects as lp
-      on
-      lp.project_id = p.id;
-    """
+      select
+        p.id as id, p.name as name, p.description as description, lp.config_path as config_path
+      from projects as p
+      left join local_projects as lp
+        on
+        lp.project_id = p.id;
+      """
 
   [<Literal>]
   let GetLocalProjectById =
@@ -44,6 +47,13 @@ module Queries =
     """
 
   [<Literal>]
+  let InsertVirtualProject =
+    """
+    insert into virtual_projects (id, connection, table_name, driver, project_id)
+    values (@id, @connection, @table_name, @driver, @project_id);
+    """
+
+  [<Literal>]
   let UpdateProjectQuery =
     """
     update projects
@@ -60,6 +70,82 @@ module Queries =
     set
       config_path = coalesce(@config_path, config_path)
     where project_id = @project_id;
+    """
+
+  [<Literal>]
+  let GetVirtualProjects =
+    """
+    select
+      p.id as id, p.name as name, p.description as description,
+      vp.connection as connection, vp.table_name as table_name, vp.driver as driver
+    from projects as p
+    left join virtual_projects as vp
+      on vp.project_id = p.id;
+    """
+
+  [<Literal>]
+  let GetVirtualProjectById =
+    """
+    select
+      p.id as id, p.name as name, p.description as description,
+      vp.connection as connection, vp.table_name as table_name, vp.driver as driver
+    from projects as p
+    left join virtual_projects as vp
+      on vp.project_id = p.id
+    where p.id = @id;
+    """
+
+  [<Literal>]
+  let UpdateVirtualProjectQuery =
+    """
+    update virtual_projects
+    set
+      connection = coalesce(@connection, connection),
+      table_name = coalesce(@table_name, table_name),
+      driver = coalesce(@driver, driver)
+    where project_id = @project_id;
+    """
+
+  [<Literal>]
+  let FindByVirtualMigrationName =
+    """
+    select
+      vm.id as id,
+      vm.name as name,
+      vm.timestamp as timestamp,
+      vm.up_content as upContent,
+      vm.down_content as downContent,
+      vm.virtual_project_id as virtualProjectId,
+      vm.manual_transaction as manualTransaction
+    from virtual_migrations as vm
+    where vm.name = @name;
+    """
+
+  [<Literal>]
+  let FindVirtualMigrationsByProjectId =
+    """
+    select
+      vm.id as id,
+      vm.name as name,
+      vm.timestamp as timestamp,
+      vm.up_content as upContent,
+      vm.down_content as downContent,
+      vm.virtual_project_id as virtualProjectId,
+      vm.manual_transaction as manualTransaction
+    from virtual_migrations as vm
+    inner join virtual_projects as vp on vm.virtual_project_id = vp.id
+    where vp.project_id = @projectId;
+    """
+
+  [<Literal>]
+  let UpdateVirtualMigrationByName =
+    """
+    update virtual_migrations
+    set
+      up_content = coalesce(@up_content, up_content),
+      down_content = coalesce(@down_content, down_content),
+      manual_transaction = coalesce(@manual_transaction, manual_transaction)
+    where name = @name;
     """
 
 module Mappers =
