@@ -7,6 +7,7 @@ open FsToolkit.ErrorHandling
 open Migrondi.Core
 
 open IcedTasks
+open MigrondiUI.Database
 
 type IVirtualProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<VirtualProject list>
@@ -72,35 +73,24 @@ let GetRepository createDbConnection =
 
   { new ILocalProjectRepository with
 
-      member _.GetProjectById projectId = cancellableTask {
-        let! token = CancellableTask.getCancellationToken()
-        return! findLocalProjectById(projectId, Some token)
-      }
+      member _.GetProjectById projectId = findLocalProjectById projectId
 
-      member _.GetProjects() = cancellableTask {
-        let! token = CancellableTask.getCancellationToken()
-        return! findLocalProjects(Some token)
-      }
+      member _.GetProjects() = findLocalProjects()
 
-      member _.InsertProject(name, path, description) = cancellableTask {
-        let! token = CancellableTask.getCancellationToken()
-        return! insertLocalProject(name, description, path, Some token)
-      }
+      member _.InsertProject(name, path, description) =
+        insertLocalProject {
+          name = name
+          description = description
+          configPath = path
+        }
 
-      member _.UpdateProject project = cancellableTask {
-        let! token = CancellableTask.getCancellationToken()
+      member _.UpdateProject project =
+        updateProject {
+          id = project.id
+          name = project.name
+          description = project.description
+        }
 
-        return!
-          updateProject(
-            project.id,
-            project.name,
-            project.description,
-            Some token
-          )
-      }
-
-      member _.UpdateProjectConfigPath(id, path) = cancellableTask {
-        let! token = CancellableTask.getCancellationToken()
-        return! updateLocalProjectConfigPath(id, path, Some token)
-      }
+      member _.UpdateProjectConfigPath(id, path) =
+        updateLocalProjectConfigPath(id, path)
   }

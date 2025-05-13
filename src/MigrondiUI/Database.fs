@@ -4,16 +4,31 @@ open System
 open System.Data
 open System.Threading
 open Donald
+open IcedTasks
 
 module Queries =
-
-  let inline sql(value: string) = value
 
   [<Literal>]
   let GetLocalProjects =
     """
       select
-        p.id as id, p.name as name, p.description as description, lp.config_path as config_path
+        p.id as id, p.name as name, p.description  [<Struct>]
+  type UpdateVirtualMigrationArgs = {
+    name: string
+    up_content: string
+    down_content: string
+    manual_transaction: bool
+  }
+
+  [<Struct>]
+  type InsertVirtualMigrationArgs = {
+    name: string
+    timestamp: int64
+    up_content: string
+    down_content: string
+    virtual_project_id: Guid
+    manual_transaction: bool
+  }lp.config_path as config_path
       from projects as p
       left join local_projects as lp
         on
@@ -113,10 +128,10 @@ module Queries =
       vm.id as id,
       vm.name as name,
       vm.timestamp as timestamp,
-      vm.up_content as upContent,
-      vm.down_content as downContent,
-      vm.virtual_project_id as virtualProjectId,
-      vm.manual_transaction as manualTransaction
+      vm.up_content as up_content,
+      vm.down_content as down_content,
+      vm.virtual_project_id as virtual_project_id,
+      vm.manual_transaction as manual_transaction
     from virtual_migrations as vm
     where vm.name = @name;
     """
@@ -128,13 +143,13 @@ module Queries =
       vm.id as id,
       vm.name as name,
       vm.timestamp as timestamp,
-      vm.up_content as upContent,
-      vm.down_content as downContent,
-      vm.virtual_project_id as virtualProjectId,
-      vm.manual_transaction as manualTransaction
+      vm.up_content as up_content,
+      vm.down_content as down_content,
+      vm.virtual_project_id as virtual_project_id,
+      vm.manual_transaction as manual_transaction
     from virtual_migrations as vm
     inner join virtual_projects as vp on vm.virtual_project_id = vp.id
-    where vp.project_id = @projectId;
+    where vp.project_id = @project_id;
     """
 
   [<Literal>]
@@ -148,7 +163,16 @@ module Queries =
     where name = @name;
     """
 
+  [<Literal>]
+  let InsertVirtualMigration =
+    """
+    insert into virtual_migrations (id, name, timestamp, up_content, down_content, virtual_project_id, manual_transaction)
+    values (@id, @name, @timestamp, @up_content, @down_content, @virtual_project_id, @manual_transaction);
+    """
+
 module Mappers =
+  open Migrondi.Core
+
   let mapLocalProject readConfig (r: IDataReader) =
     let id = r.ReadGuid "id"
     let name = r.ReadString "name"
@@ -164,16 +188,102 @@ module Mappers =
       migrondiConfigPath = configPath
     }
 
+  let mapVirtualProject(r: IDataReader) =
+    let id = r.ReadGuid "id"
+    let name = r.ReadString "name"
+    let description = r.ReadStringOption "description"
+    let connection = r.ReadString "connection"
+    let tableName = r.ReadString "table_name"
+    let driverStr = r.ReadString "driver"
+
+    let driver =
+      match driverStr with
+      | "mysql" -> MigrondiDriver.Mysql
+      | "postgres" -> MigrondiDriver.Postgresql
+      | "mssql" -> MigrondiDriver.Mssql
+      | "sqlite" -> MigrondiDriver.Sqlite
+      | _ -> MigrondiDriver.Sqlite // Default to SQLite if driver is unknown
+
+    {
+      id = id
+      name = name
+      description = description
+      connection = connection
+      tableName = tableName
+      driver = driver
+      migrations = Guid.NewGuid() // Using a new GUID as placeholder, adjust as needed for your actual data model
+    }
+
+  let mapVirtualMigration(r: IDataReader) =
+    let id = r.ReadGuid "id"
+    let name = r.ReadString "name"
+    let timestamp = r.ReadInt64 "timestamp"
+    let upContent = r.ReadString "up_content"
+    let downContent = r.ReadString "down_content"
+    let virtualProjectId = r.ReadGuid "virtual_project_id"
+    let manualTransaction = r.ReadBoolean "manual_transaction"
+
+    {
+      id = id
+      name = name
+      timestamp = timestamp
+      upContent = upContent
+      downContent = downContent
+      projectId = virtualProjectId
+      manualTransaction = manualTransaction
+    }
+
 module Database =
   open Microsoft.Data.Sqlite
 
-  let inline setCancellationToken
-    (cancellationToken: CancellationToken option)
-    (dbUnit: DbUnit)
-    =
-    match cancellationToken with
-    | Some token -> Db.setCancellationToken token dbUnit
-    | None -> dbUnit
+  [<Struct>]
+  type InsertLocalProjectArgs = {
+    name: string
+    description: string option
+    configPath: string
+  }
+
+  [<Struct>]
+  type UpdateProjectArgs = {
+    id: Guid
+    name: string
+    description: string option
+  }
+
+  [<Struct>]
+  type InsertVirtualProjectArgs = {
+    name: string
+    description: string option
+    connection: string
+    tableName: string
+    driver: string
+  }
+
+  [<Struct>]
+  type UpdateVirtualProjectArgs = {
+    projectId: Guid
+    connection: string
+    tableName: string
+    driver: string
+  }
+
+  [<Struct>]
+  type UpdateVirtualMigrationArgs = {
+    name: string
+    upContent: string
+    downContent: string
+    manualTransaction: bool
+  }
+
+  [<Struct>]
+  type InsertVirtualMigrationArgs = {
+    name: string
+    timestamp: int64
+    upContent: string
+    downContent: string
+    virtualProjectId: Guid
+    manualTransaction: bool
+  }
 
   let ConnectionFactory() : IDbConnection =
     let dbPath = System.IO.Path.Combine(AppContext.BaseDirectory, "migrondi.db")
@@ -181,48 +291,52 @@ module Database =
     new SqliteConnection(connectionString)
 
   let FindLocalProjects(readConfig, createDbConnection: unit -> IDbConnection) =
-    fun cts ->
+    fun () -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
-      connection
-      |> Db.newCommand Queries.GetLocalProjects
-      |> setCancellationToken cts
-      |> Db.Async.query(Mappers.mapLocalProject readConfig)
+      return!
+        connection
+        |> Db.newCommand Queries.GetLocalProjects
+        |> Db.setCancellationToken ct
+        |> Db.Async.query(Mappers.mapLocalProject readConfig)
+    }
 
   let FindLocalProjectById
     (readConfig, createDbConnection: unit -> IDbConnection)
     =
-    fun (projectId: Guid, cts) ->
+    fun (projectId: Guid) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
-      connection
-      |> Db.newCommand Queries.GetLocalProjectById
-      |> setCancellationToken cts
-      |> Db.setParams [ "id", sqlString projectId ]
-      |> Db.Async.querySingle(Mappers.mapLocalProject readConfig)
+      return!
+        connection
+        |> Db.newCommand Queries.GetLocalProjectById
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "id", sqlString projectId ]
+        |> Db.Async.querySingle(Mappers.mapLocalProject readConfig)
+    }
 
   let InsertLocalProject(createDbConnection: unit -> IDbConnection) =
-    fun (name: string, description: string option, configPath: string, cts) -> task {
+    fun (args: InsertLocalProjectArgs) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
       connection.TryOpenConnection()
       let projectId = Guid.NewGuid()
 
-      use! trx =
-        connection.TryBeginTransactionAsync(
-          defaultArg cts CancellationToken.None
-        )
+      use! trx = connection.TryBeginTransactionAsync(ct)
 
       do!
         connection
         |> Db.newCommand Queries.InsertProject
         |> Db.setTransaction trx
-        |> setCancellationToken cts
+        |> Db.setCancellationToken ct
         |> Db.setParams [
           "id", sqlString projectId
-          "name", sqlString name
-          "description", sqlStringOrNull description
+          "name", sqlString args.name
+          "description", sqlStringOrNull args.description
         ]
         |> Db.Async.exec
 
@@ -230,43 +344,210 @@ module Database =
         connection
         |> Db.newCommand Queries.InsertLocalProject
         |> Db.setTransaction trx
-        |> setCancellationToken cts
+        |> Db.setCancellationToken ct
         |> Db.setParams [
           "id", sqlString(Guid.NewGuid())
-          "config_path", sqlString configPath
+          "config_path", sqlString args.configPath
           "project_id", sqlString projectId
         ]
         |> Db.Async.exec
 
-      do! trx.TryCommitAsync(defaultArg cts CancellationToken.None)
+      do! trx.TryCommitAsync(ct)
       return projectId
     }
 
   let UpdateProject(createDbConnection: unit -> IDbConnection) =
-    fun (id: Guid, name: string, description: string option, cts) ->
+    fun (args: UpdateProjectArgs) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
-      connection
-      |> Db.newCommand Queries.UpdateProjectQuery
-      |> setCancellationToken cts
-      |> Db.setParams [
-        "id", sqlString id
-        "name", sqlString name
-        "description", sqlStringOrNull description
-      ]
-      |> Db.Async.exec
+      return!
+        connection
+        |> Db.newCommand Queries.UpdateProjectQuery
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "id", sqlString args.id
+          "name", sqlString args.name
+          "description", sqlStringOrNull args.description
+        ]
+        |> Db.Async.exec
+    }
 
   let UpdateLocalProjectConfigPath(createDbConnection: unit -> IDbConnection) =
-    fun (projectId: Guid, configPath: string, cts) ->
+    fun (projectId: Guid, configPath: string) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
       connection.TryOpenConnection()
 
-      connection
-      |> Db.newCommand Queries.UpdateLocalProjectConfigPathQuery
-      |> setCancellationToken cts
-      |> Db.setParams [
-        "project_id", sqlString projectId
-        "config_path", sqlString configPath
-      ]
-      |> Db.Async.exec
+      return!
+        connection
+        |> Db.newCommand Queries.UpdateLocalProjectConfigPathQuery
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "project_id", sqlString projectId
+          "config_path", sqlString configPath
+        ]
+        |> Db.Async.exec
+    }
+
+  // Virtual project database functions
+  let FindVirtualProjects(createDbConnection: unit -> IDbConnection) =
+    fun () -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+
+      return!
+        connection
+        |> Db.newCommand Queries.GetVirtualProjects
+        |> Db.setCancellationToken ct
+        |> Db.Async.query(Mappers.mapVirtualProject)
+    }
+
+  let FindVirtualProjectById(createDbConnection: unit -> IDbConnection) =
+    fun (projectId: Guid) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+
+      return!
+        connection
+        |> Db.newCommand Queries.GetVirtualProjectById
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "id", sqlString projectId ]
+        |> Db.Async.querySingle(Mappers.mapVirtualProject)
+    }
+
+  let InsertVirtualProject(createDbConnection: unit -> IDbConnection) =
+    fun (args: InsertVirtualProjectArgs) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+      let projectId = Guid.NewGuid()
+
+      use! trx = connection.TryBeginTransactionAsync(ct)
+
+      do!
+        connection
+        |> Db.newCommand Queries.InsertProject
+        |> Db.setTransaction trx
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "id", sqlString projectId
+          "name", sqlString args.name
+          "description", sqlStringOrNull args.description
+        ]
+        |> Db.Async.exec
+
+      do!
+        connection
+        |> Db.newCommand Queries.InsertVirtualProject
+        |> Db.setTransaction trx
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "id", sqlString(Guid.NewGuid())
+          "connection", sqlString args.connection
+          "table_name", sqlString args.tableName
+          "driver", sqlString args.driver
+          "project_id", sqlString projectId
+        ]
+        |> Db.Async.exec
+
+      do! trx.TryCommitAsync(ct)
+      return projectId
+    }
+
+  let UpdateVirtualProject(createDbConnection: unit -> IDbConnection) =
+    fun (args: UpdateVirtualProjectArgs) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use dbConnection = createDbConnection()
+      dbConnection.TryOpenConnection()
+
+      return!
+        dbConnection
+        |> Db.newCommand Queries.UpdateVirtualProjectQuery
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "project_id", sqlString args.projectId
+          "connection", sqlString args.connection
+          "table_name", sqlString args.tableName
+          "driver", sqlString args.driver
+        ]
+        |> Db.Async.exec
+    }
+
+  // Virtual migration database functions
+  let FindVirtualMigrationByName(createDbConnection: unit -> IDbConnection) =
+    fun (name: string) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+
+      return!
+        connection
+        |> Db.newCommand Queries.FindByVirtualMigrationName
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "name", sqlString name ]
+        |> Db.Async.querySingle(Mappers.mapVirtualMigration)
+    }
+
+  let FindVirtualMigrationsByProjectId
+    (createDbConnection: unit -> IDbConnection)
+    =
+    fun (projectId: Guid) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+
+      return!
+        connection
+        |> Db.newCommand Queries.FindVirtualMigrationsByProjectId
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "project_id", sqlString projectId ]
+        |> Db.Async.query(Mappers.mapVirtualMigration)
+    }
+
+  let UpdateVirtualMigration(createDbConnection: unit -> IDbConnection) =
+    fun (args: UpdateVirtualMigrationArgs) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+
+      return!
+        connection
+        |> Db.newCommand Queries.UpdateVirtualMigrationByName
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "name", sqlString args.name
+          "up_content", sqlString args.upContent
+          "down_content", sqlString args.downContent
+          "manual_transaction", sqlBoolean args.manualTransaction
+        ]
+        |> Db.Async.exec
+    }
+
+  let InsertVirtualMigration(createDbConnection: unit -> IDbConnection) =
+    fun (args: InsertVirtualMigrationArgs) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+      connection.TryOpenConnection()
+      let migrationId = Guid.NewGuid()
+
+      do!
+        connection
+        |> Db.newCommand Queries.InsertVirtualMigration
+        |> Db.setCancellationToken ct
+        |> Db.setParams [
+          "id", sqlString migrationId
+          "name", sqlString args.name
+          "timestamp", sqlInt64 args.timestamp
+          "up_content", sqlString args.upContent
+          "down_content", sqlString args.downContent
+          "virtual_project_id", sqlString args.virtualProjectId
+          "manual_transaction", sqlBoolean args.manualTransaction
+        ]
+        |> Db.Async.exec
+
+      return migrationId
+    }
