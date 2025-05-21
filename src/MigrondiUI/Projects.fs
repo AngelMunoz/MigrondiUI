@@ -9,11 +9,19 @@ open Migrondi.Core
 open IcedTasks
 open MigrondiUI.Database
 
+type NewVirtualProjectArgs = {
+  name: string
+  description: string
+  connection: string
+  tableName: string
+  driver: MigrondiDriver
+}
+
 type IVirtualProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<VirtualProject list>
   abstract member GetProjectById: Guid -> CancellableTask<VirtualProject option>
 
-  abstract member InsertProject: VirtualProject -> CancellableTask<Guid>
+  abstract member InsertProject: NewVirtualProjectArgs -> CancellableTask<Guid>
   abstract member UpdateProject: VirtualProject -> CancellableTask<unit>
 
   abstract member InsertMigration: VirtualMigration -> CancellableTask<Guid>
@@ -128,7 +136,7 @@ let GetVirtualProjectRepository createDbConnection =
       member _.InsertProject project =
         insertVirtualProject {
           name = project.name
-          description = project.description
+          description = project.description |> Some
           connection = project.connection
           tableName = project.tableName
           driver = project.driver.AsString

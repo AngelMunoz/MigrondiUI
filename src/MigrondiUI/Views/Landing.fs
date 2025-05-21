@@ -37,9 +37,15 @@ type ViewContentProps = {
   handleProjectSelected: Project -> unit
   handleSelectLocalProject: unit -> unit
   handleCreateNewLocalProject: unit -> unit
+  handleCreateVirtualProject: Projects.NewVirtualProjectArgs -> unit
 }
 
-type LandingVM(logger: ILogger<LandingVM>, projects: ILocalProjectRepository) =
+type LandingVM
+  (
+    logger: ILogger<LandingVM>,
+    projects: ILocalProjectRepository,
+    vProjects: IVirtualProjectRepository
+  ) =
 
   let _projects = cval []
 
@@ -177,6 +183,13 @@ type LandingVM(logger: ILogger<LandingVM>, projects: ILocalProjectRepository) =
         return ValueSome pid
   }
 
+  member _.CreateNewVirtualProject(args: Projects.NewVirtualProjectArgs) = asyncEx {
+    logger.LogDebug "Creating new virtual project"
+    let! pid = vProjects.InsertProject(args)
+    logger.LogDebug("Inserted virtual project with id {Id}", pid)
+    return pid
+  }
+
 let inline emptyProjectsView() : Control =
   StackPanel()
     .Children(TextBlock().Text("No projects available"))
@@ -264,7 +277,9 @@ let importLocalProject
     .Children(createNewLocalProject, selectLocalProject)
     .Margin(10)
 
-let createVirtualProject() : Control =
+let createVirtualProject
+  (onCreateVirtualProject: Projects.NewVirtualProjectArgs -> unit)
+  : Control =
   // State for form fields
   let name = cval ""
   let description = cval ""
@@ -315,7 +330,14 @@ let createVirtualProject() : Control =
           |> AVal.toBinding
         )
         // No-op for now, just a placeholder for submit
-        .OnClickHandler(fun _ _ -> ())
+        .OnClickHandler(fun _ _ ->
+          onCreateVirtualProject {
+            name = name.getValue()
+            description = description.getValue()
+            connection = connection.getValue()
+            driver = driver.getValue()
+            tableName = MigrondiConfig.Default.tableName
+          })
 
     Grid()
       .Classes("CreateVirtualProjectForm")
@@ -323,9 +345,14 @@ let createVirtualProject() : Control =
       .ColumnDefinitions("*,*")
       .VerticalAlignmentTop()
       .Children(
-        LabeledField.Vertical("Project Name:", nameTextBox).Row(0).Column(0),
+        LabeledField
+          .Vertical("Project Name:", nameTextBox)
+          .MarginRight(4)
+          .Row(0)
+          .Column(0),
         LabeledField
           .Vertical("Description:", descriptionTextBox)
+          .MarginLeft(4)
           .Row(0)
           .Column(1),
         LabeledField
@@ -349,7 +376,12 @@ let createVirtualProject() : Control =
 
   form
 
-let newProjectView events : Control =
+let newProjectView
+  (
+    handleSelectLocalProject,
+    handleCreateNewLocalProject,
+    handleCreateVirtualProject
+  ) : Control =
   let projectType = cval "Local"
 
   let comboBox =
@@ -382,8 +414,12 @@ let newProjectView events : Control =
           projectType
           |> AVal.map(fun t ->
             match t with
-            | "Local" -> importLocalProject(events)
-            | "Virtual" -> createVirtualProject()
+            | "Local" ->
+              importLocalProject(
+                handleSelectLocalProject,
+                handleCreateNewLocalProject
+              )
+            | "Virtual" -> createVirtualProject handleCreateVirtualProject
             | _ -> TextBlock().Text "Unknown project type")
           |> AVal.toBinding
         )
@@ -401,7 +437,8 @@ let viewContent(props: ViewContentProps) : Control =
       | NewProject ->
         newProjectView(
           props.handleSelectLocalProject,
-          props.handleCreateNewLocalProject
+          props.handleCreateNewLocalProject,
+          props.handleCreateVirtualProject
         )
       | EditProjects -> TextBlock().Text("[Edit Projects Dialog Placeholder]")
       | RemoveProjects ->
@@ -473,6 +510,18 @@ let View
         fun () -> handleSelectLocalProject() |> Async.StartImmediate
       handleCreateNewLocalProject =
         fun () -> handleCreateNewLocalProject() |> Async.StartImmediate
+      handleCreateVirtualProject =
+        fun args ->
+          asyncEx {
+            let! createdId = vm.CreateNewVirtualProject args
+            do vm.SetLandingState Empty
+
+            match! nav.Navigate $"/projects/virtual/%O{createdId}" with
+            | Ok _ -> ()
+            | Error(e) ->
+              logger.LogWarning("Navigation Failure: {error}", e.StringError())
+          }
+          |> Async.StartImmediate
     }
 
     return
