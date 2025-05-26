@@ -22,6 +22,7 @@ open Navs.Avalonia
 open Migrondi.Core
 open MigrondiUI
 open MigrondiUI.Projects
+open MigrondiUI.Views.Components
 
 
 type LandingViewState =
@@ -33,7 +34,7 @@ type LandingViewState =
 [<Struct>]
 type ViewContentProps = {
   viewState: LandingViewState aval
-  projects: LocalProject list aval
+  projects: Project list aval
   handleProjectSelected: Project -> unit
   handleSelectLocalProject: unit -> unit
   handleCreateNewLocalProject: unit -> unit
@@ -47,17 +48,23 @@ type LandingVM
     vProjects: IVirtualProjectRepository
   ) =
 
-  let _projects = cval []
+  let _projects: Project list cval = cval []
 
   let viewState = cval Empty
 
   do logger.LogDebug "LandingVM created"
 
-  member _.Projects: LocalProject list aval = _projects
+  member _.Projects: Project list aval = _projects
 
   member _.LoadProjects() = asyncEx {
     let! projects = projects.GetProjects()
-    _projects.setValue projects
+    let! vProjects = vProjects.GetProjects()
+
+    _projects.setValue [
+      yield! projects |> List.map(fun p -> Local p)
+      yield! vProjects |> List.map(fun p -> Virtual p)
+    ]
+
     return ()
   }
 
@@ -157,7 +164,7 @@ type LandingVM
 
         File.WriteAllText(
           configPath,
-          Decoders
+          Json
             .migrondiConfigEncoder(config)
             .ToJsonString(
               JsonSerializerOptions(WriteIndented = true, IndentSize = 2)
@@ -197,23 +204,25 @@ let inline emptyProjectsView() : Control =
     .Margin(5)
     .OrientationVertical()
 
-let repositoryList
-  onProjectSelected
-  (projects: LocalProject list aval)
-  : Control =
+let repositoryList onProjectSelected (projects: Project list aval) : Control =
   let repositoryItem =
-    FuncDataTemplate<LocalProject>(fun project _ ->
+    FuncDataTemplate<Project>(fun project _ ->
+      let icon =
+        match project with
+        | Local _ -> "💾 (Local)"
+        | Virtual _ -> "💻 (Virtual)"
+
       StackPanel()
-        .Tag(project.id)
+        .Tag(project.Id)
         .Children(
-          TextBlock().Text project.name,
-          TextBlock().Text(defaultArg project.description "No description")
+          TextBlock().Text $"{project.Name} - {icon}",
+          TextBlock().Text(defaultArg project.Description "No description")
         )
         .Spacing(5)
         .Margin(5)
         .OrientationVertical())
 
-  let projectsListBox(projects: LocalProject list) =
+  let projectsListBox(projects: Project list) =
 
     ListBox()
       .ItemsSource(projects)
@@ -221,6 +230,7 @@ let repositoryList
       .SingleSelection()
       .OnSelectionChanged<Project>(fun (args, source) ->
         args |> fst |> Seq.tryHead |> Option.iter(onProjectSelected)
+
         source.SelectedItem <- null)
 
 
