@@ -61,7 +61,7 @@ let GetLocalProjectRepository createDbConnection =
       let json = File.ReadAllText path
 
       return!
-        JDeck.Decoding.fromString(json, Decoders.migrondiConfigDecoder)
+        JDeck.Decoding.fromString(json, Json.migrondiConfigDecoder)
         |> Result.toOption
     with :? FileNotFoundException ->
       return! None
