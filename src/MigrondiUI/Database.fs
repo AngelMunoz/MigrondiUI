@@ -15,8 +15,8 @@ module Queries =
       p.id as id, p.name as name, p.description as description, lp.config_path as config_path
     from projects as p
     left join local_projects as lp
-      on
-      lp.project_id = p.id;
+      on lp.project_id = p.id
+    where lp.id is not null;
     """
 
   [<Literal>]
@@ -26,9 +26,8 @@ module Queries =
       p.id as id, p.name as name, p.description as description, lp.config_path as config_path
     from projects as p
     left join local_projects as lp
-      on
-      lp.project_id = p.id
-    where p.id = @id;
+      on lp.project_id = p.id
+    where p.id = @id and lp.id is not null;
     """
 
   [<Literal>]
@@ -79,7 +78,8 @@ module Queries =
       vp.connection as connection, vp.table_name as table_name, vp.driver as driver
     from projects as p
     left join virtual_projects as vp
-      on vp.project_id = p.id;
+      on vp.project_id = p.id
+    where vp.id is not null;
     """
 
   [<Literal>]
@@ -91,7 +91,7 @@ module Queries =
     from projects as p
     left join virtual_projects as vp
       on vp.project_id = p.id
-    where p.id = @id;
+    where p.id = @id and vp.id is not null;
     """
 
   [<Literal>]
