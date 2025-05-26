@@ -11,6 +11,7 @@
     <Compile Include="Projects.fs" />
     <Compile Include="VirtualFs.fs" /><Compile Include="MigrondiExt.fs" />
     <Compile Include="OsOperations.fs" />
+    <Compile Include="Components/Toolbar.fs" />
     <Compile Include="Views/Shared.fs" />
     <Compile Include="Views/Landing.fs" />
     <Compile Include="Views/ProjectDetails.fs" />
@@ -23,6 +24,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.0.0" />
+    <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="11.0.0" />
     <PackageReference Include="Avalonia.Desktop" Version="11.0.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.0.0" />
     <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="11.0.0" />
