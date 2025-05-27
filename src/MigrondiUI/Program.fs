@@ -42,7 +42,11 @@ let Orchestrate() =
   |> ValueOption.defaultWith(fun () -> failwith "No migrondi found")
   |> Migrations.Migrate
 
-  Projects.GetRepositories Database.ConnectionFactory
+  let lProjects, vProjects = Projects.GetRepositories Database.ConnectionFactory
+
+  let migrondiui = MigrondiExt.getMigrondiUI(loggerFactory, vProjects)
+
+  (lProjects, vProjects, migrondiui)
   |> Views.Routes.GetRouter loggerFactory
   |> BuildMainWindow
 

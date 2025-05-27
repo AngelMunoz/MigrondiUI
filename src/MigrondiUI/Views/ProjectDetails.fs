@@ -668,11 +668,12 @@ module LocalProjectDetails =
     }
 
 module VirtualProjectDetails =
+  open MigrondiUI.MigrondiExt
 
   type VirtualProjectDetailsVM
     (
       logger: ILogger<VirtualProjectDetailsVM>,
-      migrondi: IMigrondi,
+      migrondi: IMigrondiUI,
       project: VirtualProject
     ) =
     let _migrations = cval [||]
@@ -749,7 +750,7 @@ module VirtualProjectDetails =
     (
       logger: ILogger<VirtualProjectDetailsVM>,
       projects: IVirtualProjectRepository,
-      vMigrondi: IMigrondi
+      vMigrondiFactory: MigrondiConfig * string -> IMigrondiUI
     )
     (context: RouteContext)
     (nav: INavigable<Control>)
@@ -781,7 +782,30 @@ module VirtualProjectDetails =
         let! project = getProjectById projectId
         logger.LogDebug("Project from repository: {project}", project)
 
-        return VirtualProjectDetailsVM(logger, vMigrondi, project)
+        let migrondi =
+
+          let projectRoot =
+            let rootPath =
+              Path.Combine(Path.GetTempPath(), project.id.ToString())
+
+            try
+              Directory.CreateDirectory(rootPath).FullName
+            with ex ->
+              logger.LogWarning(
+                "Exception thrown while creating project root directory: {error}",
+                ex
+              )
+
+              Path.GetFullPath rootPath
+
+          logger.LogDebug(
+            "Using project root directory: {projectRoot}",
+            projectRoot
+          )
+
+          vMigrondiFactory(project.ToMigrondiConfig(), projectRoot)
+
+        return VirtualProjectDetailsVM(logger, migrondi, project)
       }
 
       let onNavigateBack() =

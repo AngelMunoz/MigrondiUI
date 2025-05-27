@@ -1,6 +1,7 @@
 module MigrondiUI.MigrondiExt
 
 open System
+open System.IO
 open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
@@ -19,7 +20,7 @@ type IMigrondiUI =
     migration: VirtualMigration * ?cancellationToken: CancellationToken -> Task
 
 
-let getMigrondiUI(lf: LoggerFactory, vpr: Projects.IVirtualProjectRepository) =
+let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
   let mufs = lf.CreateLogger<VirtualFs.MigrondiUIFs>()
   let ml = lf.CreateLogger<Migrondi.Core.IMigrondi>()
   let vfs = VirtualFs.getVirtualFs(mufs, vpr)

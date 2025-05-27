@@ -20,12 +20,14 @@ let private projectDetailsViewWithVM(lf: ILoggerFactory, projects) =
   let mLogger = lf.CreateLogger<Migrondi.Core.IMigrondi>()
   LocalProjectDetails.View(logger, mLogger, projects)
 
-let private vProjectDetailsViewWithVM(lf: ILoggerFactory, vProjects) =
-  fun (_: RouteContext) (_: INavigable<_>) ->
-    TextBlock().Text("Virtual project details view not implemented yet")
+let private vProjectDetailsViewWithVM
+  (lf: ILoggerFactory, vProjects, vMigrondiFactory)
+  =
+  let logger = lf.CreateLogger<VirtualProjectDetails.VirtualProjectDetailsVM>()
+  VirtualProjectDetails.View(logger, vProjects, vMigrondiFactory)
 
 
-let GetRouter lf (lProjects, vProjects) =
+let GetRouter lf (lProjects, vProjects, vMigrondiFactory) =
 
   let router: IRouter<_> =
     AvaloniaRouter [
@@ -39,7 +41,7 @@ let GetRouter lf (lProjects, vProjects) =
       Route.define(
         "virtual-project-details",
         "/projects/virtual/:projectId<guid>",
-        vProjectDetailsViewWithVM(lf, vProjects)
+        vProjectDetailsViewWithVM(lf, vProjects, vMigrondiFactory)
       )
       |> Route.cache NoCache
     ]
