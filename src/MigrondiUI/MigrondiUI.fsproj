@@ -9,11 +9,13 @@
     <Compile Include="Types.fs" />
     <Compile Include="Database.fs" />
     <Compile Include="Projects.fs" />
-    <Compile Include="VirtualFs.fs" /><Compile Include="MigrondiExt.fs" />
+    <Compile Include="VirtualFs.fs" />
+    <Compile Include="MigrondiExt.fs" />
     <Compile Include="OsOperations.fs" />
     <Compile Include="Components/Toolbar.fs" />
     <Compile Include="Views/Shared.fs" />
     <Compile Include="Views/Landing.fs" />
+    <Compile Include="Views/LocalProjectDetails.fs" />
     <Compile Include="Views/ProjectDetails.fs" />
     <Compile Include="Views/Routes.fs" />
     <Compile Include="Migrations.fs" />
