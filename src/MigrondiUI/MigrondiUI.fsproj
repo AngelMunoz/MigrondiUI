@@ -16,7 +16,7 @@
     <Compile Include="Views/Shared.fs" />
     <Compile Include="Views/Landing.fs" />
     <Compile Include="Views/LocalProjectDetails.fs" />
-    <Compile Include="Views/ProjectDetails.fs" />
+    <Compile Include="Views/VirtualProjectDetails.fs" />
     <Compile Include="Views/Routes.fs" />
     <Compile Include="Migrations.fs" />
     <Compile Include="Program.fs" />
