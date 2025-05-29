@@ -16,9 +16,9 @@ type VirtualProject = {
   name: string
   description: string option
   connection: string
-  migrations: Guid
   tableName: string
   driver: MigrondiDriver
+  projectId: Guid
 }
 
 type VirtualMigration = {
@@ -121,7 +121,7 @@ module ProjectExtensions =
 
     member this.ToMigrondiConfig() = {
       connection = this.connection
-      migrations = this.migrations.ToString()
+      migrations = this.id.ToString()
       tableName = this.tableName
       driver = this.driver
     }

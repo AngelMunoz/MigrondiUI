@@ -74,8 +74,9 @@ module Queries =
   let GetVirtualProjects =
     """
     select
-      p.id as id, p.name as name, p.description as description,
-      vp.connection as connection, vp.table_name as table_name, vp.driver as driver
+      vp.id as id, p.name as name, p.description as description,
+      vp.connection as connection, vp.table_name as table_name, vp.driver as driver,
+      p.id as project_id
     from projects as p
     left join virtual_projects as vp
       on vp.project_id = p.id
@@ -86,12 +87,13 @@ module Queries =
   let GetVirtualProjectById =
     """
     select
-      p.id as id, p.name as name, p.description as description,
-      vp.connection as connection, vp.table_name as table_name, vp.driver as driver
+      vp.id as id, p.name as name, p.description as description,
+      vp.connection as connection, vp.table_name as table_name, vp.driver as driver,
+      p.id as project_id
     from projects as p
     left join virtual_projects as vp
       on vp.project_id = p.id
-    where p.id = @id and vp.id is not null;
+    where vp.id = @id and p.id is not null;
     """
 
   [<Literal>]
@@ -133,7 +135,7 @@ module Queries =
       vm.manual_transaction as manual_transaction
     from virtual_migrations as vm
     inner join virtual_projects as vp on vm.virtual_project_id = vp.id
-    where vp.project_id = @project_id;
+    where vp.id = @project_id;
     """
 
   [<Literal>]
@@ -186,6 +188,7 @@ module Mappers =
     let connection = r.ReadString "connection"
     let tableName = r.ReadString "table_name"
     let driverStr = r.ReadString "driver"
+    let projectId = r.ReadGuid "project_id"
 
     {
       id = id
@@ -194,7 +197,7 @@ module Mappers =
       connection = connection
       tableName = tableName
       driver = MigrondiDriver.FromString driverStr
-      migrations = Guid.NewGuid() // Using a new GUID as placeholder, adjust as needed for your actual data model
+      projectId = projectId
     }
 
   let mapVirtualMigration(r: IDataReader) =

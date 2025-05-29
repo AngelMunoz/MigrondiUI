@@ -22,10 +22,10 @@ type IMigrondiUI =
 
 let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
   let mufs = lf.CreateLogger<VirtualFs.MigrondiUIFs>()
-  let ml = lf.CreateLogger<Migrondi.Core.IMigrondi>()
+  let ml = lf.CreateLogger<IMigrondi>()
   let vfs = VirtualFs.getVirtualFs(mufs, vpr)
 
-  fun (config: MigrondiConfig, rootDir: string) ->
+  fun (config: MigrondiConfig, rootDir: string, projectId: Guid) ->
 
     let migrondi =
       Migrondi.Core.Migrondi.MigrondiFactory(config, rootDir, ml, vfs)
@@ -87,7 +87,7 @@ let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
           : Task<Migration> =
 
           migrondi.RunNewAsync(
-            friendlyName,
+            $"{friendlyName}~{projectId}",
             ?upContent = upContent,
             ?downContent = downContent,
             ?cancellationToken = cancellationToken

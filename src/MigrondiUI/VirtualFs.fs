@@ -107,7 +107,7 @@ let getVirtualFs
         | Some config ->
           return {
             connection = config.connection
-            migrations = config.migrations.ToString()
+            migrations = config.id.ToString()
             tableName = config.tableName
             driver = config.driver
           }
@@ -150,7 +150,6 @@ let getVirtualFs
           let updatedProject = {
             project with
                 connection = config.connection
-                migrations = guid
                 tableName = config.tableName
                 driver = config.driver
           }
@@ -165,12 +164,18 @@ let getVirtualFs
         task {
           let ct = defaultArg cancellationToken CancellationToken.None
 
+          let migrationName, projectId =
+            match migrationName.Split '~' with
+            | [| name; projectId |] ->
+              $"{name}.sql", Guid.Parse(projectId.Remove 36)
+            | _ -> failwith "Invalid migration name format"
+
+
           logger.LogDebug(
             "Writing migration for {migrationName}",
             migrationName
           )
 
-          let guid = Guid.Parse migrationName
           let struct (timestamp, name) = extractTimestampAndName migrationName
 
           logger.LogDebug(
@@ -180,11 +185,11 @@ let getVirtualFs
             migrationName
           )
 
-          logger.LogDebug("Looking for project with id {guid}", guid)
+          logger.LogDebug("Looking for project with id {guid}", projectId)
 
           logger.LogDebug(
             "Project with id {guid} not found, creating new migration",
-            guid
+            projectId
           )
 
           let virtualMigration: VirtualMigration = {
@@ -193,7 +198,7 @@ let getVirtualFs
             timestamp = timestamp
             upContent = migration.upContent
             downContent = migration.downContent
-            projectId = guid
+            projectId = projectId
             manualTransaction = migration.manualTransaction
           }
 
