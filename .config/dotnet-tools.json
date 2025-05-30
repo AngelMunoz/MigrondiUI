@@ -4,7 +4,17 @@
   "tools": {
     "fantomas": {
       "version": "7.0.1",
-      "commands": ["fantomas"]
+      "commands": [
+        "fantomas"
+      ],
+      "rollForward": false
+    },
+    "migrondi": {
+      "version": "1.0.0-beta-011",
+      "commands": [
+        "migrondi"
+      ],
+      "rollForward": false
     }
   }
 }
