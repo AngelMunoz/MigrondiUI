@@ -6,18 +6,23 @@ open Microsoft.Extensions.Logging
 
 open IcedTasks
 
+open Avalonia
 open Avalonia.Controls
 open Avalonia.Controls.Templates
+open Avalonia.Styling
+open Avalonia.Layout
 
+open SukiUI.Controls
 open NXUI.Extensions
 
 open FSharp.Data.Adaptive
 
 open Navs
 open Navs.Avalonia
+
 open MigrondiUI
 open MigrondiUI.Projects
-open SukiUI.Controls
+
 
 type Action =
   | Edit
@@ -112,7 +117,7 @@ type LandingVM
 
 
 type ActionsBar
-  (selectedProjects: Project seq aval, actAgainstSelected: Action -> Async<unit>)
+  (selectedProjects: Project seq aval, actAgainstSelected: Action -> Async<unit>) as this
   =
   inherit UserControl()
 
@@ -190,20 +195,28 @@ type ActionsBar
 
     base.Content <-
       StackPanel()
-        .OrientationHorizontal()
-        .Spacing(4)
+        .Classes("ActionsBar_StackPanel")
         .Children(visitProjectBtn, editProjectBtn, removeBtn)
 
+    this.ApplyStyles()
 
-type RepositoryList(projects: Project list aval, onSelectionChanged) =
+  member private this.ApplyStyles() =
+    this.Styles.AddRange [
+      Style()
+        .Selector(_.OfType<StackPanel>().Class("ActionsBar_StackPanel"))
+        .SetStackLayoutOrientation(Orientation.Vertical)
+        .SetStackLayoutSpacing
+        4.0
+    ]
+
+
+type RepositoryList(projects: Project list aval, onSelectionChanged) as this =
   inherit UserControl()
 
   let emptyProjectsView: Control =
     StackPanel()
+      .Classes("RepositoryList_EmptyView")
       .Children(TextBlock().Text("No projects available"))
-      .Spacing(5)
-      .Margin(5)
-      .OrientationVertical()
 
   let repositoryItem =
     FuncDataTemplate<Project>(fun project _ ->
@@ -213,14 +226,12 @@ type RepositoryList(projects: Project list aval, onSelectionChanged) =
         | Virtual _ -> "💻 (Virtual)"
 
       StackPanel()
+        .Classes("RepositoryList_Item")
         .Tag(project.Id)
         .Children(
           TextBlock().Text $"{project.Name} - {icon}",
           TextBlock().Text(defaultArg project.Description "No description")
-        )
-        .Spacing(5)
-        .Margin(5)
-        .OrientationVertical())
+        ))
 
   do
     base.Name <- nameof RepositoryList
@@ -246,7 +257,26 @@ type RepositoryList(projects: Project list aval, onSelectionChanged) =
           |> AVal.toBinding
         )
 
-type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) =
+    this.ApplyStyles()
+
+  member private this.ApplyStyles() =
+    this.Styles.AddRange [
+      Style()
+        .Selector(_.OfType<StackPanel>().Class("RepositoryList_EmptyView"))
+        .SetStackLayoutSpacing(5.0)
+        .SetLayoutableMargin(Thickness 5.0)
+        .SetStackLayoutOrientation
+        Orientation.Vertical
+      Style()
+        .Selector(_.OfType<StackPanel>().Class("RepositoryList_Item"))
+        .SetStackLayoutSpacing(5.0)
+        .SetLayoutableMargin(Thickness 5.0)
+        .SetStackLayoutOrientation
+        Orientation.Vertical
+    ]
+
+type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as this
+  =
   inherit UserControl()
 
   let actAgainstSelected(action: Action) = asyncEx {
@@ -294,11 +324,19 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) =
 
     base.Content <-
       Grid()
+        .Classes("LandingPage_Grid")
         .RowDefinitions("2,Auto,Auto")
-        .RowSpacing(12)
-        .MarginY(2)
-        .MarginX(12)
         .Children(progressIndicator, actions, repoList)
+
+    this.ApplyStyles()
+
+  member private this.ApplyStyles() =
+    this.Styles.AddRange [
+      Style()
+        .Selector(_.OfType<Grid>().Class("LandingPage_Grid"))
+        .SetGridRowSpacing(12.0)
+        .SetLayoutableMargin(Thickness(12.0, 2.0, 12.0, 2.0))
+    ]
 
 
 let View (vm: LandingVM, logger: ILogger) _ nav : Control =
