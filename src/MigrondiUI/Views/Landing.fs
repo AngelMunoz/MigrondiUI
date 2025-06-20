@@ -93,8 +93,15 @@ type LandingVM
       return ()
 
     logger.LogDebug("Removing items: {Items}", items)
-    do! Async.Sleep(1000)
-    // Simulate removal logic
+
+    try
+      do! projects.RemoveProjects(items |> Seq.toList)
+      logger.LogInformation("Successfully removed selected items")
+    with ex ->
+      logger.LogError(ex, "Failed to remove selected items")
+      viewState.setValue(Error ex)
+      return ()
+
     do! this.LoadProjects()
     viewState.setValue Idle
     return ()
@@ -284,10 +291,11 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
     logger.LogInformation("Action triggered: {Action}", action)
     vm.SetLoading()
 
-    let item = vm.SelectedItems |> AVal.force |> Seq.exactlyOne
 
     match action with
     | Edit ->
+      let item = vm.SelectedItems |> AVal.force |> Seq.exactlyOne
+
       let type' =
         match item with
         | Local _ -> "local"
@@ -303,12 +311,14 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
 
       return ()
     | Visit ->
+      let item = vm.SelectedItems |> AVal.force |> Seq.exactlyOne
+
       let route =
         match item with
-        | Local _ -> $"/projects/local/{item.Id}"
-        | Virtual _ -> $"/projects/virtual/{item.Id}"
+        | Local _ -> $"/projects/local/{item.ProjectId}"
+        | Virtual _ -> $"/projects/virtual/{item.ProjectId}"
 
-      let! res = nav.Navigate(route)
+      let! res = nav.Navigate route
 
       res
       |> Result.teeError(fun error ->

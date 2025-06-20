@@ -3,10 +3,12 @@ module MigrondiUI.Projects
 open System
 open System.IO
 
-open FsToolkit.ErrorHandling
-open Migrondi.Core
-
 open IcedTasks
+
+open FsToolkit.ErrorHandling
+open FSharp.UMX
+
+open Migrondi.Core
 open MigrondiUI.Database
 
 type NewVirtualProjectArgs = {
@@ -19,16 +21,21 @@ type NewVirtualProjectArgs = {
 
 type IVirtualProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<VirtualProject list>
-  abstract member GetProjectById: Guid -> CancellableTask<VirtualProject option>
+
+  abstract member GetProjectById:
+    Guid<ProjectId> -> CancellableTask<VirtualProject option>
 
   abstract member InsertProject: NewVirtualProjectArgs -> CancellableTask<Guid>
   abstract member UpdateProject: VirtualProject -> CancellableTask<unit>
+
+  abstract member RemoveProjects: Project seq -> CancellableTask<unit>
 
   abstract member InsertMigration: VirtualMigration -> CancellableTask<Guid>
   abstract member UpdateMigration: VirtualMigration -> CancellableTask<unit>
   abstract member RemoveMigrationByName: string -> CancellableTask<unit>
 
-  abstract member GetMigrations: Guid -> CancellableTask<VirtualMigration list>
+  abstract member GetMigrations:
+    Guid<ProjectId> -> CancellableTask<VirtualMigration list>
 
 
   abstract member GetMigrationByName:
@@ -36,7 +43,9 @@ type IVirtualProjectRepository =
 
 type ILocalProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<LocalProject list>
-  abstract member GetProjectById: Guid -> CancellableTask<LocalProject option>
+
+  abstract member GetProjectById:
+    Guid<ProjectId> -> CancellableTask<LocalProject option>
 
   /// <summary>
   /// Inserts a local project into the database.
@@ -52,7 +61,9 @@ type ILocalProjectRepository =
   abstract member UpdateProject: LocalProject -> CancellableTask<unit>
 
   abstract member UpdateProjectConfigPath:
-    id: Guid * path: string -> CancellableTask<unit>
+    id: Guid<ProjectId> * path: string -> CancellableTask<unit>
+
+  abstract member RemoveProjects: Project seq -> CancellableTask<unit>
 
 let GetLocalProjectRepository createDbConnection =
   let readConfig(path: string) = option {
@@ -78,6 +89,8 @@ let GetLocalProjectRepository createDbConnection =
   let updateLocalProjectConfigPath =
     UpdateLocalProjectConfigPath createDbConnection
 
+  let batchDeleteProjects = BatchDeleteProjects createDbConnection
+
   { new ILocalProjectRepository with
 
       member _.GetProjectById projectId = findLocalProjectById projectId
@@ -100,6 +113,11 @@ let GetLocalProjectRepository createDbConnection =
 
       member _.UpdateProjectConfigPath(id, path) =
         updateLocalProjectConfigPath(id, path)
+
+      member _.RemoveProjects projects =
+        batchDeleteProjects(
+          projects |> Seq.map(_.ProjectId >> UMX.tag<ProjectId>)
+        )
   }
 
 let GetVirtualProjectRepository createDbConnection =
@@ -122,6 +140,8 @@ let GetVirtualProjectRepository createDbConnection =
 
   let removeVirtualMigrationByName =
     RemoveVirtualMigrationByName createDbConnection
+
+  let batchDeleteProjects = BatchDeleteProjects createDbConnection
 
   { new IVirtualProjectRepository with
       member _.GetProjects() = findVirtualProjects()
@@ -180,6 +200,11 @@ let GetVirtualProjectRepository createDbConnection =
         findVirtualMigrationsByProjectId projectId
 
       member _.GetMigrationByName name = findVirtualMigrationByName name
+
+      member _.RemoveProjects projects =
+        batchDeleteProjects(
+          projects |> Seq.map(_.ProjectId >> UMX.tag<ProjectId>)
+        )
   }
 
 let inline GetRepositories createDbConnection =

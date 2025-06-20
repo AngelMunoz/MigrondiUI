@@ -11,6 +11,7 @@ open Avalonia.Controls.Templates
 open NXUI.Extensions
 
 open IcedTasks
+open FSharp.UMX
 open FsToolkit.ErrorHandling
 open FSharp.Data.Adaptive
 
@@ -19,6 +20,7 @@ open Navs.Avalonia
 open Migrondi.Core
 open MigrondiUI
 open MigrondiUI.Projects
+open MigrondiUI.Database
 open MigrondiUI.Components
 open MigrondiUI.Components.MigrationRunnerToolbar
 
@@ -352,7 +354,7 @@ type VProjectDetailsView
 
 let buildDetailsView
   (
-    projectId: Guid,
+    projectId: Guid<ProjectId>,
     logger: ILogger<VirtualProjectDetailsVM>,
     projects: IVirtualProjectRepository,
     vMigrondiFactory: MigrondiConfig * string * Guid -> IMigrondiUI,
@@ -390,12 +392,12 @@ let buildDetailsView
     return VProjectDetailsView(logger, vm, onNavigateBack) :> Control
   }
 
-let buildProjectNotFound(id: Guid) : Control =
+let buildProjectNotFound(id: Guid<ProjectId>) : Control =
   UserControl()
     .Name("VirtualProjectDetails")
     .Content(TextBlock().Text($"Project with the given id {id} was not found."))
 
-let buildLoading(id: Guid) : Control =
+let buildLoading(id: Guid<ProjectId>) : Control =
   UserControl()
     .Name("VirtualProjectDetails")
     .Content(TextBlock().Text($"Loading project with the given id {id}..."))
@@ -410,10 +412,13 @@ let View
   (nav: INavigable<Control>)
   : Control =
 
-  let projectId = context.getParam<Guid> "projectId" |> ValueOption.toOption
+  let projectId =
+    context.getParam<Guid> "projectId"
+    |> ValueOption.map UMX.tag<ProjectId>
+    |> ValueOption.toOption
 
   let view =
-    let projectId = defaultArg projectId Guid.Empty
+    let projectId = defaultArg projectId (UMX.tag<ProjectId> Guid.Empty)
     cval(buildLoading projectId)
 
   let onNavigateBack() =
@@ -445,7 +450,7 @@ let View
     |> Async.StartImmediate
   | None ->
     logger.LogDebug("No project ID found in route parameters")
-    view.setValue(buildProjectNotFound Guid.Empty)
+    view.setValue(buildProjectNotFound(UMX.tag<ProjectId> Guid.Empty))
 
   UserControl()
     .Name("VirtualProjectDetails")

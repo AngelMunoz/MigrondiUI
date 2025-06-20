@@ -5,13 +5,16 @@ open System.Collections.Generic
 open System.IO
 open System.Text.RegularExpressions
 open System.Threading
+
 open IcedTasks
+open FSharp.UMX
 
 open Migrondi.Core
 open Migrondi.Core.FileSystem
 open Migrondi.Core.Serialization
 
 open MigrondiUI.Projects
+open MigrondiUI.Database
 open Microsoft.Extensions.Logging
 open FsToolkit.ErrorHandling
 
@@ -164,7 +167,7 @@ let getVirtualFs
         )
 
         let guid = Guid.Parse migrationsLocation
-        let! migrations = vpr.GetMigrations guid ct
+        let! migrations = vpr.GetMigrations (UMX.tag<ProjectId> guid) ct
 
         let migrations: Migration list =
           migrations
@@ -189,7 +192,7 @@ let getVirtualFs
         let ct = defaultArg cancellationToken CancellationToken.None
         logger.LogDebug("Reading configuration for {readFrom}", readFrom)
         let guid = Guid.Parse readFrom
-        let! config = vpr.GetProjectById guid ct
+        let! config = vpr.GetProjectById (UMX.tag<ProjectId> guid) ct
 
         match config with
         | None -> return failwith $"Project with id %s{readFrom} not found"
@@ -231,7 +234,7 @@ let getVirtualFs
         let ct = defaultArg cancellationToken CancellationToken.None
         logger.LogDebug("Writing configuration for {writeTo}", writeTo)
         let guid = Guid.Parse writeTo
-        let! project = vpr.GetProjectById guid ct
+        let! project = vpr.GetProjectById (UMX.tag<ProjectId> guid) ct
 
         match project with
         | None -> return failwith $"Project with id %s{writeTo} not found"
@@ -299,8 +302,11 @@ let getVirtualFs
         )
 
         let! found = taskOption {
-          let! project = vpr.GetProjectById project token
-          let! migrations = vpr.GetMigrations project.id token
+          let! project = vpr.GetProjectById (UMX.tag<ProjectId> project) token
+
+          let! migrations =
+            vpr.GetMigrations (UMX.tag<ProjectId> project.projectId) token
+
           return project, migrations
         }
 

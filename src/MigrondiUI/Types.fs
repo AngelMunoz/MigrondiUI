@@ -9,6 +9,7 @@ type LocalProject = {
   description: string option
   config: MigrondiConfig option
   migrondiConfigPath: string
+  projectId: Guid
 }
 
 type VirtualProject = {
@@ -98,6 +99,11 @@ module ProjectExtensions =
       match this with
       | Local p -> p.id
       | Virtual p -> p.id
+
+    member this.ProjectId =
+      match this with
+      | Local p -> p.projectId
+      | Virtual p -> p.projectId
 
     member this.Name =
       match this with

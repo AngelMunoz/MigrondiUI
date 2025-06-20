@@ -4,6 +4,12 @@ open System
 open System.Data
 open Donald
 open IcedTasks
+open FSharp.UMX
+
+
+[<Measure>]
+type ProjectId
+
 
 module Queries =
 
@@ -11,7 +17,11 @@ module Queries =
   let GetLocalProjects =
     """
     select
-      p.id as id, p.name as name, p.description as description, lp.config_path as config_path
+      lp.id as id,
+      lp.config_path as config_path,
+      p.name as name,
+      p.id as project_id,
+      p.description as description
     from projects as p
     left join local_projects as lp
       on lp.project_id = p.id
@@ -22,7 +32,11 @@ module Queries =
   let GetLocalProjectById =
     """
     select
-      p.id as id, p.name as name, p.description as description, lp.config_path as config_path
+      lp.id as id,
+      lp.config_path as config_path,
+      p.id as project_id,
+      p.name as name,
+      p.description as description
     from projects as p
     left join local_projects as lp
       on lp.project_id = p.id
@@ -162,6 +176,13 @@ module Queries =
     where name = @name;
     """
 
+  [<Literal>]
+  let DeleteProject =
+    """
+    delete from projects
+    where id = @id;
+    """
+
 module Mappers =
   open Migrondi.Core
 
@@ -170,6 +191,7 @@ module Mappers =
     let name = r.ReadString "name"
     let description = r.ReadStringOption "description"
     let configPath = r.ReadString "config_path"
+    let projectId = r.ReadGuid "project_id"
     let config = readConfig configPath
 
     {
@@ -178,6 +200,7 @@ module Mappers =
       description = description
       config = config
       migrondiConfigPath = configPath
+      projectId = projectId
     }
 
   let mapVirtualProject(r: IDataReader) =
@@ -292,7 +315,7 @@ module Database =
   let FindLocalProjectById
     (readConfig, createDbConnection: unit -> IDbConnection)
     =
-    fun (projectId: Guid) -> cancellableTask {
+    fun (projectId: Guid<ProjectId>) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
 
@@ -365,7 +388,7 @@ module Database =
     }
 
   let UpdateLocalProjectConfigPath(createDbConnection: unit -> IDbConnection) =
-    fun (projectId: Guid, configPath: string) -> cancellableTask {
+    fun (projectId: Guid<ProjectId>, configPath: string) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
 
@@ -398,7 +421,7 @@ module Database =
     }
 
   let FindVirtualProjectById(createDbConnection: unit -> IDbConnection) =
-    fun (projectId: Guid) -> cancellableTask {
+    fun (projectId: Guid<ProjectId>) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
 
@@ -493,7 +516,7 @@ module Database =
   let FindVirtualMigrationsByProjectId
     (createDbConnection: unit -> IDbConnection)
     =
-    fun (projectId: Guid) -> cancellableTask {
+    fun (projectId: Guid<ProjectId>) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
 
@@ -567,4 +590,24 @@ module Database =
         |> Db.setCancellationToken ct
         |> Db.setParams [ "name", sqlString name ]
         |> Db.Async.exec
+    }
+
+
+  let BatchDeleteProjects(createDbConnection: unit -> IDbConnection) =
+    fun (ids: Guid<ProjectId> seq) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
+      let! tran = connection.TryBeginTransactionAsync(ct)
+
+      for id in ids do
+        do!
+          Db.newCommandForTransaction Queries.DeleteProject tran
+          |> Db.setCancellationToken ct
+          |> Db.setParams [ "id", sqlString id ]
+          |> Db.Async.exec
+
+      do! tran.TryCommitAsync ct
+      return ()
     }
