@@ -4,7 +4,6 @@ open System
 
 open Microsoft.Extensions.Logging
 
-open IcedTasks
 
 open Avalonia
 open Avalonia.Controls
@@ -15,6 +14,8 @@ open Avalonia.Layout
 open SukiUI.Controls
 open NXUI.Extensions
 
+open IcedTasks
+open FsToolkit.ErrorHandling
 open FSharp.Data.Adaptive
 
 open Navs
@@ -204,7 +205,7 @@ type ActionsBar
     this.Styles.AddRange [
       Style()
         .Selector(_.OfType<StackPanel>().Class("ActionsBar_StackPanel"))
-        .SetStackLayoutOrientation(Orientation.Vertical)
+        .SetStackLayoutOrientation(Orientation.Horizontal)
         .SetStackLayoutSpacing
         4.0
     ]
@@ -283,18 +284,42 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
     logger.LogInformation("Action triggered: {Action}", action)
     vm.SetLoading()
 
+    let item = vm.SelectedItems |> AVal.force |> Seq.exactlyOne
+
     match action with
     | Edit ->
-      logger.LogInformation("Edit action triggered")
-      do! Async.Sleep(1000)
-      vm.SetIdle()
+      let type' =
+        match item with
+        | Local _ -> "local"
+        | Virtual _ -> "virtual"
+
+      let! res =
+        nav.NavigateByName("edit-project", Map.ofList [ "type", type' ])
+
+      res
+      |> Result.teeError(fun error ->
+        logger.LogWarning("Navigation Failure: {error}", error.StringError()))
+      |> Result.iter vm.SetIdle
+
+      return ()
     | Visit ->
-      logger.LogInformation("Visit action triggered")
-      do! Async.Sleep(1000)
-      vm.SetIdle()
+      let route =
+        match item with
+        | Local _ -> $"/projects/local/{item.Id}"
+        | Virtual _ -> $"/projects/virtual/{item.Id}"
+
+      let! res = nav.Navigate(route)
+
+      res
+      |> Result.teeError(fun error ->
+        logger.LogWarning("Navigation Failure: {error}", error.StringError()))
+      |> Result.iter vm.SetIdle
+
+      return ()
     | Remove ->
-      logger.LogInformation("Remove action triggered")
+      logger.LogInformation "Remove action triggered"
       do! vm.RemoveSelectedItems()
+      return ()
   }
 
   let progressIndicator =
