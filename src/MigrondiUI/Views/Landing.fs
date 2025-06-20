@@ -12,7 +12,6 @@ open Avalonia.Controls.Templates
 open NXUI.Extensions
 
 open FSharp.Data.Adaptive
-open FsToolkit.ErrorHandling
 
 open Navs
 open Navs.Avalonia
@@ -20,10 +19,15 @@ open MigrondiUI
 open MigrondiUI.Projects
 open SukiUI.Controls
 
-type LandingViewState =
-  | EditProjects
-  | RemoveProjects
-  | Empty
+type Action =
+  | Edit
+  | Remove
+  | Visit
+
+type ViewState =
+  | Idle
+  | Loading
+  | Error of exn
 
 type LandingVM
   (
@@ -34,43 +38,89 @@ type LandingVM
 
   let _projects: Project list cval = cval []
 
-  let viewState = cval Empty
+  let selectedItems: Project seq cval = cval Seq.empty
+
+  let viewState = cval Idle
 
   do logger.LogDebug "LandingVM created"
+
+  member _.ViewState: ViewState aval = viewState
+
+  member _.SelectedItems: Project seq aval = selectedItems
 
   member _.Projects: Project list aval = _projects
 
   member _.LoadProjects() = asyncEx {
-    let! projects = projects.GetProjects()
-    let! vProjects = vProjects.GetProjects()
+    logger.LogDebug "Loading projects"
+    viewState.setValue Loading
 
-    _projects.setValue [
-      yield! projects |> List.map(fun p -> Local p)
-      yield! vProjects |> List.map(fun p -> Virtual p)
-    ]
+    try
+      let! projects = projects.GetProjects()
+      let! vProjects = vProjects.GetProjects()
 
+      _projects.setValue [
+        yield! projects |> List.map(fun p -> Local p)
+        yield! vProjects |> List.map(fun p -> Virtual p)
+      ]
+
+      logger.LogInformation(
+        "Projects loaded successfully: {Count}",
+        _projects.Value.Length
+      )
+
+      viewState.setValue Idle
+      return ()
+    with ex ->
+      logger.LogError(ex, "Failed to load projects")
+      viewState.setValue(Error ex)
+      return ()
+  }
+
+  member this.RemoveSelectedItems() = asyncEx {
+    viewState.setValue Loading
+    let items = selectedItems |> AVal.force
+
+    logger.LogDebug("Removing selected items: {Items}", items)
+
+    if Seq.isEmpty items then
+      logger.LogWarning "No items selected for removal"
+      return ()
+
+    logger.LogDebug("Removing items: {Items}", items)
+    do! Async.Sleep(1000)
+
+    logger.LogInformation("Selected items removed successfully")
+    do! this.LoadProjects()
+    viewState.setValue Idle
     return ()
   }
 
-  member _.SetLandingState(state: LandingViewState) =
-    logger.LogDebug("Setting landing state to {State}", state)
-    viewState.setValue state
+  member _.SetSelectedItems(items: Project seq) =
+    logger.LogDebug("Setting selected items to {Items}", items)
+    selectedItems.setValue items
 
-  member _.EmptyViewState() =
-    logger.LogDebug "Setting landing state to Empty"
-    viewState.setValue Empty
+  member _.SetLoading() =
+    logger.LogDebug "Setting view state to Loading"
+    viewState.setValue Loading
 
-  member _.ViewState: aval<LandingViewState> = viewState
+  member _.SetIdle() =
+    logger.LogDebug "Setting view state to Idle"
+    viewState.setValue Idle
+
+  member _.SetError(ex: exn) =
+    logger.LogError(ex, "An error occurred in LandingVM")
+    viewState.setValue(Error ex)
 
 
-let inline emptyProjectsView() : Control =
+
+let emptyProjectsView() : Control =
   StackPanel()
     .Children(TextBlock().Text("No projects available"))
     .Spacing(5)
     .Margin(5)
     .OrientationVertical()
 
-let repositoryList onProjectSelected (projects: Project list aval) : Control =
+let repositoryList(projects: Project list aval, onSelectionChanged) : Control =
   let repositoryItem =
     FuncDataTemplate<Project>(fun project _ ->
       let icon =
@@ -88,18 +138,6 @@ let repositoryList onProjectSelected (projects: Project list aval) : Control =
         .Margin(5)
         .OrientationVertical())
 
-  let projectsListBox(projects: Project list) =
-
-    ListBox()
-      .ItemsSource(projects)
-      .ItemTemplate(repositoryItem)
-      .SingleSelection()
-      .OnSelectionChanged<Project>(fun (args, source) ->
-        args |> fst |> Seq.tryHead |> Option.iter(onProjectSelected)
-
-        source.SelectedItem <- null)
-
-
   ScrollViewer()
     .Name("ProjectList")
     .Content(
@@ -107,23 +145,92 @@ let repositoryList onProjectSelected (projects: Project list aval) : Control =
       |> AVal.map(fun projects ->
         match projects with
         | [] -> emptyProjectsView()
-        | projects -> projectsListBox projects)
+        | projects ->
+          ListBox()
+            .MultipleSelection()
+            .ItemsSource(projects)
+            .ItemTemplate(repositoryItem)
+            .OnSelectionChangedHandler(fun sender args ->
+              match sender.SelectedItems with
+              | null -> onSelectionChanged Seq.empty
+              | selected ->
+                selected |> Seq.cast<Project> |> onSelectionChanged))
       |> AVal.toBinding
     )
 
 
-let viewContent(handleProjectSelected, projects, viewState) : Control =
-  let content =
-    viewState
-    |> AVal.map(fun state ->
-      match state with
-      | EditProjects ->
-        TextBlock().Text("[Edit Projects Dialog Placeholder]") :> Control
-      | RemoveProjects ->
-        TextBlock().Text("[Remove Projects Dialog Placeholder]")
-      | Empty -> repositoryList handleProjectSelected projects)
+let actionsBar
+  (selectedProjects: Project seq aval, actAgainstSelected: Action -> Async<unit>) =
+  let progress = cval false
+  let projects = selectedProjects |> AVal.map Seq.toList
 
-  Border().Child(content |> AVal.toBinding)
+  let visitProjectBtn =
+    Button()
+      .Content("Visit Project")
+      .ShowProgress(progress |> AVal.toBinding)
+      .IsEnabled(
+        projects
+        |> AVal.map2
+          (fun inProgress projectList ->
+            let isEnabled = projectList |> List.tryExactlyOne |> Option.isSome
+            isEnabled && not inProgress)
+          progress
+        |> AVal.toBinding
+      )
+      .OnClickHandler(fun _ _ ->
+        asyncEx {
+          progress.setValue true
+          do! actAgainstSelected Visit
+          progress.setValue false
+
+        }
+        |> Async.StartImmediate)
+
+  let editProjectBtn =
+    Button()
+      .Content("Edit")
+      .ShowProgress(progress |> AVal.toBinding)
+      .IsEnabled(
+        projects
+        |> AVal.map2
+          (fun inProgress projectList ->
+            let isEnabled = projectList |> List.tryExactlyOne |> Option.isSome
+            isEnabled && not inProgress)
+          progress
+        |> AVal.toBinding
+      )
+      .OnClickHandler(fun _ _ ->
+        asyncEx {
+          progress.setValue true
+          do! actAgainstSelected Edit
+          progress.setValue false
+        }
+        |> Async.StartImmediate)
+
+  let removeBtn =
+    Button()
+      .Classes("Danger")
+      .Content("Remove")
+      .ShowProgress(progress |> AVal.toBinding)
+      .IsEnabled(
+        projects
+        |> AVal.map2
+          (fun inProgress projects -> projects.Length > 0 && not inProgress)
+          progress
+        |> AVal.toBinding
+      )
+      .OnClickHandler(fun _ _ ->
+        asyncEx {
+          progress.setValue true
+          do! actAgainstSelected Remove
+          progress.setValue false
+        }
+        |> Async.StartImmediate)
+
+  StackPanel()
+    .OrientationHorizontal()
+    .Spacing(4)
+    .Children(visitProjectBtn, editProjectBtn, removeBtn)
 
 let View
   (vm: LandingVM, logger: ILogger)
@@ -133,23 +240,50 @@ let View
   let view = UserControl()
   vm.LoadProjects() |> Async.StartImmediate
 
-  let handleProjectSelected(project: Project) =
-    asyncEx {
-      let url =
-        match project with
-        | Local _ -> $"/projects/local/{project.Id.ToString()}"
-        | Virtual _ -> $"/projects/virtual/{project.Id.ToString()}"
+  let actAgainstSelected(action: Action) = asyncEx {
+    logger.LogInformation("Action triggered: {Action}", action)
+    vm.SetLoading()
 
-      match! nav.Navigate url with
-      | Ok _ -> ()
-      | Error(e) ->
-        logger.LogWarning("Navigation Failure: {error}", e.StringError())
-    }
-    |> Async.StartImmediate
+    match action with
+    | Edit ->
+      logger.LogInformation("Edit action triggered")
+      do! Async.Sleep(1000)
+      vm.SetIdle()
+    | Visit ->
+      logger.LogInformation("Visit action triggered")
+      do! Async.Sleep(1000)
+      vm.SetIdle()
+    | Remove ->
+      logger.LogInformation("Remove action triggered")
+      do! vm.RemoveSelectedItems()
+  }
+
+
 
   view
     .Name("Landing")
     .Content(
-      GlassCard()
-        .Content(viewContent(handleProjectSelected, vm.Projects, vm.ViewState))
+      Grid()
+        .RowDefinitions("2,Auto,Auto")
+        .RowSpacing(12)
+        .MarginY(2)
+        .MarginX(12)
+        .Children(
+          UserControl()
+            .Content(
+              vm.ViewState
+              |> AVal.map(fun state ->
+                match state with
+                | Error _
+                | Idle -> UserControl() :> Control
+                | Loading -> ProgressBar().IsIndeterminate(true))
+              |> AVal.toBinding
+            ),
+          GlassCard()
+            .Content(actionsBar(vm.SelectedItems, actAgainstSelected))
+            .Row(1),
+          GlassCard()
+            .Content(repositoryList(vm.Projects, vm.SetSelectedItems))
+            .Row(2)
+        )
     )

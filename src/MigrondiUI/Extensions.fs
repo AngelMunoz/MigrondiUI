@@ -336,6 +336,13 @@ module SukiUIExtensions =
       this.SetCurrentValue(ButtonExtensions.ShowProgressProperty, showProgress)
       this
 
+    member inline this.ShowProgress(showProgress: IBinding) =
+      let descriptor =
+        ButtonExtensions.ShowProgressProperty.Bind().WithMode BindingMode.OneWay
+
+      this[descriptor] <- showProgress
+      this
+
 type NavigationError<'View> with
   member this.StringError() =
     match this with
