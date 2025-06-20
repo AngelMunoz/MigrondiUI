@@ -88,23 +88,22 @@ type LandingVM
 
     logger.LogDebug("Removing items: {Items}", items)
     do! Async.Sleep(1000)
-
-    logger.LogInformation("Selected items removed successfully")
+    // Simulate removal logic
     do! this.LoadProjects()
     viewState.setValue Idle
     return ()
   }
 
   member _.SetSelectedItems(items: Project seq) =
-    logger.LogDebug("Setting selected items to {Items}", items)
+    logger.LogTrace("Setting selected items to {Items}", items)
     selectedItems.setValue items
 
   member _.SetLoading() =
-    logger.LogDebug "Setting view state to Loading"
+    logger.LogTrace "Setting view state to Loading"
     viewState.setValue Loading
 
   member _.SetIdle() =
-    logger.LogDebug "Setting view state to Idle"
+    logger.LogTrace "Setting view state to Idle"
     viewState.setValue Idle
 
   member _.SetError(ex: exn) =
@@ -112,55 +111,11 @@ type LandingVM
     viewState.setValue(Error ex)
 
 
+type ActionsBar
+  (selectedProjects: Project seq aval, actAgainstSelected: Action -> Async<unit>)
+  =
+  inherit UserControl()
 
-let emptyProjectsView() : Control =
-  StackPanel()
-    .Children(TextBlock().Text("No projects available"))
-    .Spacing(5)
-    .Margin(5)
-    .OrientationVertical()
-
-let repositoryList(projects: Project list aval, onSelectionChanged) : Control =
-  let repositoryItem =
-    FuncDataTemplate<Project>(fun project _ ->
-      let icon =
-        match project with
-        | Local _ -> "💾 (Local)"
-        | Virtual _ -> "💻 (Virtual)"
-
-      StackPanel()
-        .Tag(project.Id)
-        .Children(
-          TextBlock().Text $"{project.Name} - {icon}",
-          TextBlock().Text(defaultArg project.Description "No description")
-        )
-        .Spacing(5)
-        .Margin(5)
-        .OrientationVertical())
-
-  ScrollViewer()
-    .Name("ProjectList")
-    .Content(
-      projects
-      |> AVal.map(fun projects ->
-        match projects with
-        | [] -> emptyProjectsView()
-        | projects ->
-          ListBox()
-            .MultipleSelection()
-            .ItemsSource(projects)
-            .ItemTemplate(repositoryItem)
-            .OnSelectionChangedHandler(fun sender args ->
-              match sender.SelectedItems with
-              | null -> onSelectionChanged Seq.empty
-              | selected ->
-                selected |> Seq.cast<Project> |> onSelectionChanged))
-      |> AVal.toBinding
-    )
-
-
-let actionsBar
-  (selectedProjects: Project seq aval, actAgainstSelected: Action -> Async<unit>) =
   let progress = cval false
   let projects = selectedProjects |> AVal.map Seq.toList
 
@@ -173,6 +128,7 @@ let actionsBar
         |> AVal.map2
           (fun inProgress projectList ->
             let isEnabled = projectList |> List.tryExactlyOne |> Option.isSome
+
             isEnabled && not inProgress)
           progress
         |> AVal.toBinding
@@ -195,6 +151,7 @@ let actionsBar
         |> AVal.map2
           (fun inProgress projectList ->
             let isEnabled = projectList |> List.tryExactlyOne |> Option.isSome
+
             isEnabled && not inProgress)
           progress
         |> AVal.toBinding
@@ -227,18 +184,70 @@ let actionsBar
         }
         |> Async.StartImmediate)
 
-  StackPanel()
-    .OrientationHorizontal()
-    .Spacing(4)
-    .Children(visitProjectBtn, editProjectBtn, removeBtn)
+  do
+    base.Classes.Add("ActionsBar")
+    base.Name <- nameof ActionsBar
 
-let View
-  (vm: LandingVM, logger: ILogger)
-  _
-  (nav: INavigable<Control>)
-  : Control =
-  let view = UserControl()
-  vm.LoadProjects() |> Async.StartImmediate
+    base.Content <-
+      StackPanel()
+        .OrientationHorizontal()
+        .Spacing(4)
+        .Children(visitProjectBtn, editProjectBtn, removeBtn)
+
+
+type RepositoryList(projects: Project list aval, onSelectionChanged) =
+  inherit UserControl()
+
+  let emptyProjectsView: Control =
+    StackPanel()
+      .Children(TextBlock().Text("No projects available"))
+      .Spacing(5)
+      .Margin(5)
+      .OrientationVertical()
+
+  let repositoryItem =
+    FuncDataTemplate<Project>(fun project _ ->
+      let icon =
+        match project with
+        | Local _ -> "💾 (Local)"
+        | Virtual _ -> "💻 (Virtual)"
+
+      StackPanel()
+        .Tag(project.Id)
+        .Children(
+          TextBlock().Text $"{project.Name} - {icon}",
+          TextBlock().Text(defaultArg project.Description "No description")
+        )
+        .Spacing(5)
+        .Margin(5)
+        .OrientationVertical())
+
+  do
+    base.Name <- nameof RepositoryList
+    base.Classes.Add("RepositoryList")
+
+    base.Content <-
+      ScrollViewer()
+        .Content(
+          projects
+          |> AVal.map(fun projects ->
+            match projects with
+            | [] -> emptyProjectsView
+            | projects ->
+              ListBox()
+                .MultipleSelection()
+                .ItemsSource(projects)
+                .ItemTemplate(repositoryItem)
+                .OnSelectionChangedHandler(fun sender _ ->
+                  match sender.SelectedItems with
+                  | null -> onSelectionChanged Seq.empty
+                  | selected ->
+                    selected |> Seq.cast<Project> |> onSelectionChanged))
+          |> AVal.toBinding
+        )
+
+type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) =
+  inherit UserControl()
 
   let actAgainstSelected(action: Action) = asyncEx {
     logger.LogInformation("Action triggered: {Action}", action)
@@ -258,32 +267,39 @@ let View
       do! vm.RemoveSelectedItems()
   }
 
+  let progressIndicator =
+    UserControl()
+      .Content(
+        vm.ViewState
+        |> AVal.map(fun state ->
+          match state with
+          | Error _
+          | Idle -> UserControl() :> Control
+          | Loading -> ProgressBar().IsIndeterminate true)
+        |> AVal.toBinding
+      )
+
+  let actions =
+    GlassCard().Content(ActionsBar(vm.SelectedItems, actAgainstSelected)).Row(1)
+
+  let repoList =
+    GlassCard().Content(RepositoryList(vm.Projects, vm.SetSelectedItems)).Row(2)
+
+  do
+    vm.LoadProjects() |> Async.StartImmediate
 
 
-  view
-    .Name("Landing")
-    .Content(
+    base.Name <- nameof LandingPage
+    base.Classes.Add "LandingPage"
+
+    base.Content <-
       Grid()
         .RowDefinitions("2,Auto,Auto")
         .RowSpacing(12)
         .MarginY(2)
         .MarginX(12)
-        .Children(
-          UserControl()
-            .Content(
-              vm.ViewState
-              |> AVal.map(fun state ->
-                match state with
-                | Error _
-                | Idle -> UserControl() :> Control
-                | Loading -> ProgressBar().IsIndeterminate(true))
-              |> AVal.toBinding
-            ),
-          GlassCard()
-            .Content(actionsBar(vm.SelectedItems, actAgainstSelected))
-            .Row(1),
-          GlassCard()
-            .Content(repositoryList(vm.Projects, vm.SetSelectedItems))
-            .Row(2)
-        )
-    )
+        .Children(progressIndicator, actions, repoList)
+
+
+let View (vm: LandingVM, logger: ILogger) _ nav : Control =
+  LandingPage(vm, logger, nav)
