@@ -354,7 +354,7 @@ type VProjectDetailsView
 
 let buildDetailsView
   (
-    projectId: Guid<ProjectId>,
+    projectId: Guid<VProjectId>,
     logger: ILogger<VirtualProjectDetailsVM>,
     projects: IVirtualProjectRepository,
     vMigrondiFactory: MigrondiConfig * string * Guid -> IMigrondiUI,
@@ -364,7 +364,7 @@ let buildDetailsView
     let! cancellationToken = Async.CancellationToken
     logger.LogDebug("Project ID from route parameters: {projectId}", projectId)
 
-    let! project = projects.GetProjectByProjectId projectId cancellationToken
+    let! project = projects.GetProjectById projectId cancellationToken
     logger.LogDebug("Project from repository: {project}", project)
 
     let migrondi =
@@ -392,12 +392,12 @@ let buildDetailsView
     return VProjectDetailsView(logger, vm, onNavigateBack) :> Control
   }
 
-let buildProjectNotFound(id: Guid<ProjectId>) : Control =
+let buildProjectNotFound(id: Guid<VProjectId>) : Control =
   UserControl()
     .Name("VirtualProjectDetails")
     .Content(TextBlock().Text($"Project with the given id {id} was not found."))
 
-let buildLoading(id: Guid<ProjectId>) : Control =
+let buildLoading(id: Guid<VProjectId>) : Control =
   UserControl()
     .Name("VirtualProjectDetails")
     .Content(TextBlock().Text($"Loading project with the given id {id}..."))
@@ -413,12 +413,12 @@ let View
   : Control =
 
   let projectId =
-    context.getParam<Guid> "projectId"
-    |> ValueOption.map UMX.tag<ProjectId>
+    context.getParam<Guid> "vProjectId"
+    |> ValueOption.map UMX.tag<VProjectId>
     |> ValueOption.toOption
 
   let view =
-    let projectId = defaultArg projectId (UMX.tag<ProjectId> Guid.Empty)
+    let projectId = defaultArg projectId (UMX.tag<VProjectId> Guid.Empty)
     cval(buildLoading projectId)
 
   let onNavigateBack() =
@@ -450,7 +450,7 @@ let View
     |> Async.StartImmediate
   | None ->
     logger.LogDebug("No project ID found in route parameters")
-    view.setValue(buildProjectNotFound(UMX.tag<ProjectId> Guid.Empty))
+    view.setValue(buildProjectNotFound(UMX.tag<VProjectId> Guid.Empty))
 
   UserControl()
     .Name("VirtualProjectDetails")

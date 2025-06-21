@@ -40,7 +40,7 @@ type NewProjectVM
 
   do logger.LogDebug "NewProjectVM created"
 
-  member _.LoadLocalProject(view: Control) : Async<Guid option> = asyncOption {
+  member _.LoadLocalProject(view: Control) = asyncOption {
     let! token = Async.CancellationToken
     logger.LogDebug "Loading local project"
     let! topLevel = TopLevel.GetTopLevel(view)
@@ -66,14 +66,10 @@ type NewProjectVM
 
     logger.LogDebug("Selected file: {File}", file.Name)
 
-    let! pid =
-      projects.InsertProject
-        (name,
-         // TODO: handle uris when we're not on desktop platforms
-         configPath = file.Path.LocalPath)
-        token
+    let! lpid =
+      projects.InsertProject (name, configPath = file.Path.LocalPath) token
 
-    return pid
+    return lpid
   }
 
   member _.CreateNewLocalProject(view) = asyncOption {
@@ -145,34 +141,30 @@ type NewProjectVM
     return pid
   }
 
-  member _.ImportToVirtualProject
-    (view: Control)
-    : Async<Guid<VProjectId> option> =
-    asyncOption {
-      logger.LogDebug "Importing local project to virtual project"
-      let! token = Async.CancellationToken
-      let! topLevel = TopLevel.GetTopLevel(view)
+  member _.ImportToVirtualProject(view: Control) = asyncOption {
+    logger.LogDebug "Importing local project to virtual project"
+    let! token = Async.CancellationToken
+    let! topLevel = TopLevel.GetTopLevel(view)
 
-      let! file =
-        topLevel.StorageProvider.OpenFilePickerAsync(
-          FilePickerOpenOptions(
-            Title = "Select Project File",
-            AllowMultiple = false,
-            FileTypeFilter = [|
-              FilePickerFileType(
-                "Migrondi Config",
-                Patterns = [ "migrondi.json" ]
-              )
-            |]
-          )
+    let! file =
+      topLevel.StorageProvider.OpenFilePickerAsync(
+        FilePickerOpenOptions(
+          Title = "Select Project File",
+          AllowMultiple = false,
+          FileTypeFilter = [|
+            FilePickerFileType(
+              "Migrondi Config",
+              Patterns = [ "migrondi.json" ]
+            )
+          |]
         )
+      )
 
-      let! file = file |> Seq.tryHead
-      logger.LogDebug("Selected file: {File}", file.Name)
-      let! guid = vfs.ImportFromLocal file.Path.LocalPath token
-      let! project = vProjects.GetProjectById guid token
-      return UMX.tag<VProjectId> project.projectId
-    }
+    let! file = file |> Seq.tryHead
+    logger.LogDebug("Selected file: {File}", file.Name)
+    let! vpid = vfs.ImportFromLocal file.Path.LocalPath token
+    return vpid
+  }
 
 let private localProjectTab
   (
@@ -209,10 +201,12 @@ let View
   let handleSelectLocalProject(target: LocalProjectTarget) = asyncEx {
     let! projectId = asyncEx {
       match target with
-      | CreateLocal -> return! vm.LoadLocalProject view
+      | CreateLocal ->
+        let! guid = vm.LoadLocalProject view
+        return guid |> Option.map UMX.untag
       | ImportToVirtual ->
         let! guid = vm.ImportToVirtualProject view
-        return guid |> Option.map UMX.untag
+        return guid |> Option.map(UMX.untag)
     }
 
     match projectId with

@@ -340,8 +340,8 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
 
       let route =
         match item with
-        | Local _ -> $"/projects/local/{item.ProjectId}"
-        | Virtual _ -> $"/projects/virtual/{item.ProjectId}"
+        | Local _ -> $"/projects/local/{item.Id}"
+        | Virtual _ -> $"/projects/virtual/{item.Id}"
 
       let! res = nav.Navigate route
 

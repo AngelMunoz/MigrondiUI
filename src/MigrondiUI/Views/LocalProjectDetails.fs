@@ -309,7 +309,7 @@ type LProjectDetailsView(vm: LocalProjectDetailsVM, onNavigateBack) =
 
 let buildDetailsView
   (
-    projectId: Guid<ProjectId>,
+    projectId: Guid<LProjectId>,
     logger: ILogger<LocalProjectDetailsVM>,
     mLogger: ILogger<IMigrondi>,
     projects: ILocalProjectRepository,
@@ -317,7 +317,7 @@ let buildDetailsView
   ) =
   asyncOption {
     let! cancellationToken = Async.CancellationToken
-    let! project = projects.GetProjectByProjectId projectId cancellationToken
+    let! project = projects.GetProjectById projectId cancellationToken
 
     logger.LogDebug("Project from repository: {project}", project)
 
@@ -332,12 +332,12 @@ let buildDetailsView
     return LProjectDetailsView(vm, onNavigateBack) :> Control
   }
 
-let buildProjectNotFound(id: Guid<ProjectId>) : Control =
+let buildProjectNotFound(id: Guid<LProjectId>) : Control =
   UserControl()
     .Name("ProjectNotFound")
     .Content(TextBlock().Text($"Project with ID {id} was not found."))
 
-let buildLoading(id: Guid<ProjectId>) : Control =
+let buildLoading(id: Guid<LProjectId>) : Control =
   UserControl()
     .Name("ProjectLoading")
     .Content(TextBlock().Text($"Loading project with ID {id}..."))
@@ -351,13 +351,13 @@ let View
   (context: RouteContext)
   (nav: INavigable<Control>)
   : Control =
-  let projectId =
-    context.getParam<Guid> "projectId"
-    |> ValueOption.map UMX.tag<ProjectId>
+  let lProjectId =
+    context.getParam<Guid> "lProjectId"
+    |> ValueOption.map UMX.tag<LProjectId>
     |> ValueOption.toOption
 
   let view =
-    let projectId = defaultArg projectId (UMX.tag<ProjectId> Guid.Empty)
+    let projectId = defaultArg lProjectId (UMX.tag<LProjectId> Guid.Empty)
     cval(buildLoading projectId)
 
   let onNavigateBack() =
@@ -369,7 +369,7 @@ let View
     }
     |> Async.StartImmediate
 
-  match projectId with
+  match lProjectId with
   | Some projectId ->
     logger.LogDebug("Project ID from route parameters: {projectId}", projectId)
 
@@ -383,7 +383,7 @@ let View
     |> Async.StartImmediate
   | None ->
     logger.LogDebug("No project ID found in route parameters")
-    view.setValue(buildProjectNotFound(UMX.tag<ProjectId> Guid.Empty))
+    view.setValue(buildProjectNotFound(UMX.tag<LProjectId> Guid.Empty))
 
   UserControl()
     .Name("LocalProjectDetails")

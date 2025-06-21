@@ -6,7 +6,8 @@ open FSharp.Data.Adaptive
 
 type DisposableCommand(canExecute: bool aval, action: unit -> unit) as this =
 
-  let event = new Event<EventHandler, EventArgs>()
+  let event = new Event<EventHandler, _>()
+
   let mutable _canExecute = canExecute |> AVal.force
 
   let sub =

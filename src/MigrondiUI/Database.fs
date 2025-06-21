@@ -41,7 +41,7 @@ module Queries =
     """
 
   [<Literal>]
-  let GetLocalProjectById =
+  let GetLocalProjectByProjectId =
     """
     select
       lp.id as id,
@@ -53,6 +53,21 @@ module Queries =
     left join local_projects as lp
       on lp.project_id = p.id
     where p.id = @id and lp.id is not null;
+    """
+
+  [<Literal>]
+  let GetLocalProjectById =
+    """
+    select
+      lp.id as id,
+      lp.config_path as config_path,
+      p.id as project_id,
+      p.name as name,
+      p.description as description
+    from local_projects as lp
+    left join projects as p
+      on lp.project_id = p.id
+    where lp.id = @id;
     """
 
   [<Literal>]
@@ -128,10 +143,10 @@ module Queries =
       vp.id as id, p.name as name, p.description as description,
       vp.connection as connection, vp.table_name as table_name, vp.driver as driver,
       p.id as project_id
-    from projects as p
-    left join virtual_projects as vp
+    from virtual_projects as vp
+    left join projects as p
       on vp.project_id = p.id
-    where vp.id = @id and p.id is not null;
+    where vp.id = @id;
     """
 
   [<Literal>]
@@ -278,7 +293,7 @@ module Database =
 
   [<Struct>]
   type UpdateProjectArgs = {
-    id: Guid
+    id: Guid<ProjectId>
     name: string
     description: string option
   }
@@ -294,7 +309,7 @@ module Database =
 
   [<Struct>]
   type UpdateVirtualProjectArgs = {
-    id: Guid
+    id: Guid<VProjectId>
     connection: string
     tableName: string
     driver: string
@@ -337,10 +352,27 @@ module Database =
         |> Db.Async.query(Mappers.mapLocalProject readConfig)
     }
 
-  let FindLocalProjectById
+  let FindLocalProjectByProjectId
     (readConfig, createDbConnection: unit -> IDbConnection)
     =
     fun (projectId: Guid<ProjectId>) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
+
+      return!
+        connection
+        |> Db.newCommand Queries.GetLocalProjectByProjectId
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "id", sqlString projectId ]
+        |> Db.Async.querySingle(Mappers.mapLocalProject readConfig)
+    }
+
+  let FindLocalProjectById
+    (readConfig, createDbConnection: unit -> IDbConnection)
+    =
+    fun (projectId: Guid<LProjectId>) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
 
@@ -362,6 +394,7 @@ module Database =
       do! connection.TryOpenConnectionAsync(ct)
 
       let projectId = Guid.NewGuid()
+      let lprojectId = Guid.NewGuid()
 
       use! trx = connection.TryBeginTransactionAsync(ct)
 
@@ -383,14 +416,14 @@ module Database =
         |> Db.setTransaction trx
         |> Db.setCancellationToken ct
         |> Db.setParams [
-          "id", sqlString(Guid.NewGuid())
+          "id", sqlString(lprojectId)
           "config_path", sqlString args.configPath
           "project_id", sqlString projectId
         ]
         |> Db.Async.exec
 
       do! trx.TryCommitAsync(ct)
-      return projectId
+      return UMX.tag<LProjectId> lprojectId
     }
 
   let UpdateProject(createDbConnection: unit -> IDbConnection) =

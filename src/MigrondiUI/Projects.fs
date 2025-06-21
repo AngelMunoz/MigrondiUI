@@ -52,6 +52,9 @@ type ILocalProjectRepository =
   abstract member GetProjectByProjectId:
     Guid<ProjectId> -> CancellableTask<LocalProject option>
 
+  abstract member GetProjectById:
+    Guid<LProjectId> -> CancellableTask<LocalProject option>
+
   /// <summary>
   /// Inserts a local project into the database.
   /// </summary>
@@ -61,7 +64,7 @@ type ILocalProjectRepository =
   /// <returns>The ID of the inserted project.</returns>
   abstract member InsertProject:
     name: string * configPath: string * ?description: string ->
-      CancellableTask<Guid>
+      CancellableTask<Guid<LProjectId>>
 
   abstract member UpdateProject: LocalProject -> CancellableTask<unit>
 
@@ -86,6 +89,9 @@ let GetLocalProjectRepository createDbConnection =
   let findLocalProjects = FindLocalProjects(readConfig, createDbConnection)
 
   let findLocalProjectByProjectId =
+    FindLocalProjectByProjectId(readConfig, createDbConnection)
+
+  let findLocalProjectById =
     FindLocalProjectById(readConfig, createDbConnection)
 
   let insertLocalProject = InsertLocalProject createDbConnection
@@ -101,6 +107,8 @@ let GetLocalProjectRepository createDbConnection =
       member _.GetProjectByProjectId projectId =
         findLocalProjectByProjectId projectId
 
+      member _.GetProjectById projectId = findLocalProjectById projectId
+
       member _.GetProjects() = findLocalProjects()
 
       member _.InsertProject(name, path, description) =
@@ -112,7 +120,7 @@ let GetLocalProjectRepository createDbConnection =
 
       member _.UpdateProject project =
         updateProject {
-          id = project.id
+          id = UMX.tag<ProjectId> project.projectId
           name = project.name
           description = project.description
         }
@@ -173,14 +181,14 @@ let GetVirtualProjectRepository createDbConnection =
         // First update the base project information
         do!
           updateProject {
-            id = project.projectId
+            id = UMX.tag<ProjectId> project.projectId
             name = project.name
             description = project.description
           }
 
         return!
           updateVirtualProject {
-            id = project.id
+            id = UMX.tag<VProjectId> project.id
             connection = project.connection
             tableName = project.tableName
             driver = project.driver.AsString

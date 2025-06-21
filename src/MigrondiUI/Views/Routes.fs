@@ -94,12 +94,12 @@ type MigrondiUIAppHost(env: AppEnvironment) =
         Route("new-project", "/projects/new", newProjectView env),
         Route(
           "local-project-details",
-          "/projects/local/:projectId<guid>",
+          "/projects/local/:lProjectId<guid>",
           projectDetailsView env
         ),
         Route(
           "virtual-project-details",
-          "/projects/virtual/:projectId<guid>",
+          "/projects/virtual/:vProjectId<guid>",
           vProjectDetailsView env
         )
       )
