@@ -364,7 +364,7 @@ let buildDetailsView
     let! cancellationToken = Async.CancellationToken
     logger.LogDebug("Project ID from route parameters: {projectId}", projectId)
 
-    let! project = projects.GetProjectById projectId cancellationToken
+    let! project = projects.GetProjectByProjectId projectId cancellationToken
     logger.LogDebug("Project from repository: {project}", project)
 
     let migrondi =

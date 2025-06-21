@@ -2,17 +2,21 @@ module MigrondiUI.Views.Landing
 
 open System
 
+open System.Windows.Input
 open Microsoft.Extensions.Logging
 
 
 open Avalonia
 open Avalonia.Controls
 open Avalonia.Controls.Templates
+open Avalonia.Input
 open Avalonia.Styling
 open Avalonia.Layout
 
 open SukiUI.Controls
+open NXUI
 open NXUI.Extensions
+open NXUI.Interactivity
 
 open IcedTasks
 open FsToolkit.ErrorHandling
@@ -23,6 +27,8 @@ open Navs.Avalonia
 
 open MigrondiUI
 open MigrondiUI.Projects
+open MigrondiUI.Commands
+open System.Diagnostics
 
 
 type Action =
@@ -95,16 +101,18 @@ type LandingVM
     logger.LogDebug("Removing items: {Items}", items)
 
     try
-      do! projects.RemoveProjects(items |> Seq.toList)
+      do! projects.RemoveProjects(items)
+      this.SetSelectedItems Seq.empty
+
       logger.LogInformation("Successfully removed selected items")
+      do! this.LoadProjects()
+      viewState.setValue Idle
+      return ()
     with ex ->
       logger.LogError(ex, "Failed to remove selected items")
       viewState.setValue(Error ex)
+      do! this.LoadProjects()
       return ()
-
-    do! this.LoadProjects()
-    viewState.setValue Idle
-    return ()
   }
 
   member _.SetSelectedItems(items: Project seq) =
@@ -227,23 +235,49 @@ type RepositoryList(projects: Project list aval, onSelectionChanged) as this =
       .Children(TextBlock().Text("No projects available"))
 
   let repositoryItem =
-    FuncDataTemplate<Project>(fun project _ ->
+    FuncDataTemplate<Project | null>(fun project _ ->
       let icon =
         match project with
         | Local _ -> "💾 (Local)"
         | Virtual _ -> "💻 (Virtual)"
 
-      StackPanel()
-        .Classes("RepositoryList_Item")
-        .Tag(project.Id)
-        .Children(
-          TextBlock().Text $"{project.Name} - {icon}",
-          TextBlock().Text(defaultArg project.Description "No description")
-        ))
+      if project = null then
+        UserControl()
+      else
+        let project = nonNull project
+
+        StackPanel()
+          .Classes("RepositoryList_Item")
+          .Children(
+            TextBlock().Text $"{project.Name} - {icon}",
+            TextBlock().Text(defaultArg project.Description "No description")
+          ))
+
+  let projectList =
+    ListBox()
+      .MultipleSelection()
+      .ItemsSource(projects |> AVal.toBinding)
+      .ItemTemplate(repositoryItem)
+      .OnSelectionChangedHandler(fun sender _ ->
+        match sender.SelectedItems with
+        | null -> onSelectionChanged Seq.empty
+        | selected -> selected |> Seq.cast<Project> |> onSelectionChanged)
 
   do
     base.Name <- nameof RepositoryList
     base.Classes.Add("RepositoryList")
+
+    base.KeyBindings.Add(
+      KeyBinding()
+        .Gesture(KeyGesture Key.Escape)
+        .Command(
+          Command.OfAction(fun () ->
+            match projectList.SelectedItems with
+            | null -> ()
+            | selected -> selected.Clear())
+        )
+    )
+
 
     base.Content <-
       ScrollViewer()
@@ -252,16 +286,7 @@ type RepositoryList(projects: Project list aval, onSelectionChanged) as this =
           |> AVal.map(fun projects ->
             match projects with
             | [] -> emptyProjectsView
-            | projects ->
-              ListBox()
-                .MultipleSelection()
-                .ItemsSource(projects)
-                .ItemTemplate(repositoryItem)
-                .OnSelectionChangedHandler(fun sender _ ->
-                  match sender.SelectedItems with
-                  | null -> onSelectionChanged Seq.empty
-                  | selected ->
-                    selected |> Seq.cast<Project> |> onSelectionChanged))
+            | _ -> projectList)
           |> AVal.toBinding
         )
 
@@ -353,7 +378,6 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
   do
     vm.LoadProjects() |> Async.StartImmediate
 
-
     base.Name <- nameof LandingPage
     base.Classes.Add "LandingPage"
 
@@ -363,6 +387,7 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
         .RowDefinitions("2,Auto,Auto")
         .Children(progressIndicator, actions, repoList)
 
+    this.AddKeyBindings()
     this.ApplyStyles()
 
   member private this.ApplyStyles() =
@@ -371,6 +396,39 @@ type LandingPage(vm: LandingVM, logger: ILogger, nav: INavigable<Control>) as th
         .Selector(_.OfType<Grid>().Class("LandingPage_Grid"))
         .SetGridRowSpacing(12.0)
         .SetLayoutableMargin(Thickness(12.0, 2.0, 12.0, 2.0))
+    ]
+
+  member private this.AddKeyBindings() =
+    this.KeyBindings.AddRange [
+      KeyBinding()
+        .Gesture(KeyGesture Key.F5)
+        .Command(
+          Command.OfAction(fun () -> vm.LoadProjects() |> Async.StartImmediate)
+        )
+      KeyBinding()
+        .Gesture(KeyGesture Key.Delete)
+        .Command(
+          Command.OfAVal(
+            vm.SelectedItems |> AVal.map(Seq.isEmpty >> not),
+            fun () -> actAgainstSelected Remove |> Async.StartImmediate
+          )
+        )
+      KeyBinding()
+        .Gesture(KeyGesture Key.Enter)
+        .Command(
+          Command.OfAVal(
+            vm.SelectedItems |> AVal.map(Seq.tryExactlyOne >> Option.isSome),
+            fun () -> actAgainstSelected Visit |> Async.StartImmediate
+          )
+        )
+      KeyBinding()
+        .Gesture(KeyGesture(Key.Enter, KeyModifiers.Shift))
+        .Command(
+          Command.OfAVal(
+            vm.SelectedItems |> AVal.map(Seq.tryExactlyOne >> Option.isSome),
+            fun () -> actAgainstSelected Edit |> Async.StartImmediate
+          )
+        )
     ]
 
 

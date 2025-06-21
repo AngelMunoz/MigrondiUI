@@ -10,6 +10,18 @@ open FSharp.UMX
 [<Measure>]
 type ProjectId
 
+[<Measure>]
+type VProjectId
+
+[<Measure>]
+type LProjectId
+
+// TODO: Fix guid return inconcistency
+// Create methods should return Guid<LProjectId> or Guid<VProjectId>
+// Find by Id methods should find by Guid<LProjectId> or Guid<VProjectId>
+// Find by ProjectId methods should find by Guid<ProjectId>
+
+
 
 module Queries =
 
@@ -94,6 +106,19 @@ module Queries =
     left join virtual_projects as vp
       on vp.project_id = p.id
     where vp.id is not null;
+    """
+
+  [<Literal>]
+  let GetVirtualProjectByProjectId =
+    """
+    select
+      vp.id as id, p.name as name, p.description as description,
+      vp.connection as connection, vp.table_name as table_name, vp.driver as driver,
+      p.id as project_id
+    from projects as p
+    left join virtual_projects as vp
+      on vp.project_id = p.id
+    where p.id = @id and vp.id is not null;
     """
 
   [<Literal>]
@@ -420,8 +445,23 @@ module Database =
         |> Db.Async.query(Mappers.mapVirtualProject)
     }
 
-  let FindVirtualProjectById(createDbConnection: unit -> IDbConnection) =
+  let FindVirtualProjectByProjectId(createDbConnection: unit -> IDbConnection) =
     fun (projectId: Guid<ProjectId>) -> cancellableTask {
+      let! ct = CancellableTask.getCancellationToken()
+      use connection = createDbConnection()
+
+      do! connection.TryOpenConnectionAsync(ct)
+
+      return!
+        connection
+        |> Db.newCommand Queries.GetVirtualProjectByProjectId
+        |> Db.setCancellationToken ct
+        |> Db.setParams [ "id", sqlString projectId ]
+        |> Db.Async.querySingle Mappers.mapVirtualProject
+    }
+
+  let FindVirtualProjectById(createDbConnection: unit -> IDbConnection) =
+    fun (vprojectId: Guid<VProjectId>) -> cancellableTask {
       let! ct = CancellableTask.getCancellationToken()
       use connection = createDbConnection()
 
@@ -431,8 +471,8 @@ module Database =
         connection
         |> Db.newCommand Queries.GetVirtualProjectById
         |> Db.setCancellationToken ct
-        |> Db.setParams [ "id", sqlString projectId ]
-        |> Db.Async.querySingle(Mappers.mapVirtualProject)
+        |> Db.setParams [ "id", sqlString vprojectId ]
+        |> Db.Async.querySingle Mappers.mapVirtualProject
     }
 
   let InsertVirtualProject(createDbConnection: unit -> IDbConnection) =
@@ -474,7 +514,7 @@ module Database =
         |> Db.Async.exec
 
       do! trx.TryCommitAsync(ct)
-      return vProjectId
+      return UMX.tag<VProjectId> vProjectId
     }
 
   let UpdateVirtualProject(createDbConnection: unit -> IDbConnection) =

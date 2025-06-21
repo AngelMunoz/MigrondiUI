@@ -51,7 +51,7 @@ let private newProjectView appEnvironment =
   let logger = lf.CreateLogger<NewProject.NewProjectVM>()
 
   NewProject.View(
-    (NewProject.NewProjectVM(logger, lProjects, vProjects, vfs)),
+    NewProject.NewProjectVM(logger, lProjects, vProjects, vfs),
     logger
   )
 
@@ -87,7 +87,10 @@ type MigrondiUIAppHost(env: AppEnvironment) =
   let content =
     Routes(logger = routesLogger)
       .Children(
-        Route("landing", "/", landingView env),
+        Route(
+          Route.define("landing", "/", landingView env)
+          |> Navs.Route.cache Navs.NoCache
+        ),
         Route("new-project", "/projects/new", newProjectView env),
         Route(
           "local-project-details",

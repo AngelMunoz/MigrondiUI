@@ -13,7 +13,7 @@ open Avalonia.Platform.Storage
 
 open NXUI.Extensions
 
-open FSharp.Data.Adaptive
+open FSharp.UMX
 open FsToolkit.ErrorHandling
 
 open Navs
@@ -21,6 +21,7 @@ open Navs.Avalonia
 open Migrondi.Core
 open MigrondiUI
 open MigrondiUI.Projects
+open MigrondiUI.Database
 open MigrondiUI.Components.NewVirtualProjectForm
 open MigrondiUI.VirtualFs
 open SukiUI.Controls
@@ -144,30 +145,34 @@ type NewProjectVM
     return pid
   }
 
-  member _.ImportToVirtualProject(view: Control) : Async<Guid option> = asyncOption {
-    logger.LogDebug "Importing local project to virtual project"
-    let! token = Async.CancellationToken
-    let! topLevel = TopLevel.GetTopLevel(view)
+  member _.ImportToVirtualProject
+    (view: Control)
+    : Async<Guid<VProjectId> option> =
+    asyncOption {
+      logger.LogDebug "Importing local project to virtual project"
+      let! token = Async.CancellationToken
+      let! topLevel = TopLevel.GetTopLevel(view)
 
-    let! file =
-      topLevel.StorageProvider.OpenFilePickerAsync(
-        FilePickerOpenOptions(
-          Title = "Select Project File",
-          AllowMultiple = false,
-          FileTypeFilter = [|
-            FilePickerFileType(
-              "Migrondi Config",
-              Patterns = [ "migrondi.json" ]
-            )
-          |]
+      let! file =
+        topLevel.StorageProvider.OpenFilePickerAsync(
+          FilePickerOpenOptions(
+            Title = "Select Project File",
+            AllowMultiple = false,
+            FileTypeFilter = [|
+              FilePickerFileType(
+                "Migrondi Config",
+                Patterns = [ "migrondi.json" ]
+              )
+            |]
+          )
         )
-      )
 
-    let! file = file |> Seq.tryHead
-    logger.LogDebug("Selected file: {File}", file.Name)
-    let! guid = vfs.ImportFromLocal file.Path.LocalPath token
-    return guid
-  }
+      let! file = file |> Seq.tryHead
+      logger.LogDebug("Selected file: {File}", file.Name)
+      let! guid = vfs.ImportFromLocal file.Path.LocalPath token
+      let! project = vProjects.GetProjectById guid token
+      return UMX.tag<VProjectId> project.projectId
+    }
 
 let private localProjectTab
   (
@@ -203,10 +208,11 @@ let View
 
   let handleSelectLocalProject(target: LocalProjectTarget) = asyncEx {
     let! projectId = asyncEx {
-      return!
-        match target with
-        | CreateLocal -> vm.LoadLocalProject view
-        | ImportToVirtual -> vm.ImportToVirtualProject view
+      match target with
+      | CreateLocal -> return! vm.LoadLocalProject view
+      | ImportToVirtual ->
+        let! guid = vm.ImportToVirtualProject view
+        return guid |> Option.map UMX.untag
     }
 
     match projectId with

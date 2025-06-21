@@ -22,10 +22,15 @@ type NewVirtualProjectArgs = {
 type IVirtualProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<VirtualProject list>
 
-  abstract member GetProjectById:
+  abstract member GetProjectByProjectId:
     Guid<ProjectId> -> CancellableTask<VirtualProject option>
 
-  abstract member InsertProject: NewVirtualProjectArgs -> CancellableTask<Guid>
+  abstract member GetProjectById:
+    Guid<VProjectId> -> CancellableTask<VirtualProject option>
+
+  abstract member InsertProject:
+    NewVirtualProjectArgs -> CancellableTask<Guid<VProjectId>>
+
   abstract member UpdateProject: VirtualProject -> CancellableTask<unit>
 
   abstract member RemoveProjects: Project seq -> CancellableTask<unit>
@@ -44,7 +49,7 @@ type IVirtualProjectRepository =
 type ILocalProjectRepository =
   abstract member GetProjects: unit -> CancellableTask<LocalProject list>
 
-  abstract member GetProjectById:
+  abstract member GetProjectByProjectId:
     Guid<ProjectId> -> CancellableTask<LocalProject option>
 
   /// <summary>
@@ -80,7 +85,7 @@ let GetLocalProjectRepository createDbConnection =
 
   let findLocalProjects = FindLocalProjects(readConfig, createDbConnection)
 
-  let findLocalProjectById =
+  let findLocalProjectByProjectId =
     FindLocalProjectById(readConfig, createDbConnection)
 
   let insertLocalProject = InsertLocalProject createDbConnection
@@ -93,7 +98,8 @@ let GetLocalProjectRepository createDbConnection =
 
   { new ILocalProjectRepository with
 
-      member _.GetProjectById projectId = findLocalProjectById projectId
+      member _.GetProjectByProjectId projectId =
+        findLocalProjectByProjectId projectId
 
       member _.GetProjects() = findLocalProjects()
 
@@ -123,7 +129,8 @@ let GetLocalProjectRepository createDbConnection =
 let GetVirtualProjectRepository createDbConnection =
   let findVirtualProjects = FindVirtualProjects createDbConnection
 
-  let findVirtualProjectById = FindVirtualProjectById createDbConnection
+  let findVirtualProjectByProjectId =
+    FindVirtualProjectByProjectId createDbConnection
 
   let insertVirtualProject = InsertVirtualProject createDbConnection
   let updateVirtualProject = UpdateVirtualProject createDbConnection
@@ -133,6 +140,8 @@ let GetVirtualProjectRepository createDbConnection =
 
   let findVirtualMigrationsByProjectId =
     FindVirtualMigrationsByProjectId createDbConnection
+
+  let findVirtualProjectById = FindVirtualProjectById createDbConnection
 
   let insertVirtualMigration = InsertVirtualMigration createDbConnection
 
@@ -145,6 +154,9 @@ let GetVirtualProjectRepository createDbConnection =
 
   { new IVirtualProjectRepository with
       member _.GetProjects() = findVirtualProjects()
+
+      member _.GetProjectByProjectId projectId =
+        findVirtualProjectByProjectId projectId
 
       member _.GetProjectById projectId = findVirtualProjectById projectId
 

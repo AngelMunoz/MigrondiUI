@@ -53,99 +53,104 @@ type MigrondiUIFs =
     project: Guid * projectPath: string -> CancellableTask<string>
 
   abstract member ImportFromLocal:
-    project: LocalProject -> CancellableTask<Guid>
+    project: LocalProject -> CancellableTask<Guid<VProjectId>>
 
-  abstract member ImportFromLocal: projectPath: string -> CancellableTask<Guid>
+  abstract member ImportFromLocal:
+    projectPath: string -> CancellableTask<Guid<VProjectId>>
 
 let getVirtualFs
   (logger: ILogger<MigrondiUIFs>, vpr: IVirtualProjectRepository)
   =
-  let importProjectFromPath (configPath: string) (projectName: string) = cancellableTask {
-    let configSerializer, migrationSerializer =
-      let serializer = MigrondiSerializer()
+  let importProjectFromPath
+    (configPath: string)
+    (projectName: string)
+    : CancellableTask<Guid<VProjectId>> =
+    cancellableTask {
+      let configSerializer, migrationSerializer =
+        let serializer = MigrondiSerializer()
 
-      serializer :> IMiConfigurationSerializer,
-      serializer :> IMiMigrationSerializer
+        serializer :> IMiConfigurationSerializer,
+        serializer :> IMiMigrationSerializer
 
-    let rootDir = Path.GetDirectoryName(configPath)
+      let rootDir = Path.GetDirectoryName(configPath)
 
-    logger.LogInformation(
-      "Importing project {projectName} from {rootDir}",
-      projectName,
-      rootDir
+      logger.LogInformation(
+        "Importing project {projectName} from {rootDir}",
+        projectName,
+        rootDir
 
-    )
+      )
 
-    let! config = cancellableTask {
-      let! token = CancellableTask.getCancellationToken()
-      let! content = File.ReadAllTextAsync(configPath, token)
-      return configSerializer.Decode content
-    }
-
-    logger.LogInformation("Found config {config}", config)
-
-    let migrationsDir =
-      DirectoryInfo(Path.Combine(nonNull rootDir, config.migrations))
-
-    let! migrations =
-      migrationsDir.EnumerateFiles("*.sql", SearchOption.TopDirectoryOnly)
-      |> Seq.map(fun f -> asyncEx {
-        let! token = Async.CancellationToken
-        let! content = File.ReadAllTextAsync(f.FullName, token)
-        logger.LogDebug("Found migration {migrationPath}", f.FullName)
-        return migrationSerializer.DecodeText content
-      })
-      |> Async.Parallel
-
-    logger.LogInformation("Found migrations {migrations}", migrations.Length)
-
-    logger.LogInformation(
-      "Creating new virtual project {projectName}",
-      projectName
-    )
-
-    let! vProjectId =
-      vpr.InsertProject {
-        name = projectName
-        description = $"Imported from local ({projectName})"
-        connection = config.connection
-        tableName = config.tableName
-        driver = config.driver
+      let! config = cancellableTask {
+        let! token = CancellableTask.getCancellationToken()
+        let! content = File.ReadAllTextAsync(configPath, token)
+        return configSerializer.Decode content
       }
 
-    let! migrations =
-      migrations
-      |> Array.map(fun migration -> asyncEx {
-        let! token = Async.CancellationToken
+      logger.LogInformation("Found config {config}", config)
 
-        let vMigration = {
-          id = Guid.NewGuid()
-          name = migration.name
-          timestamp = migration.timestamp
-          upContent = migration.upContent
-          downContent = migration.downContent
-          manualTransaction = migration.manualTransaction
-          projectId = vProjectId
+      let migrationsDir =
+        DirectoryInfo(Path.Combine(nonNull rootDir, config.migrations))
+
+      let! migrations =
+        migrationsDir.EnumerateFiles("*.sql", SearchOption.TopDirectoryOnly)
+        |> Seq.map(fun f -> asyncEx {
+          let! token = Async.CancellationToken
+          let! content = File.ReadAllTextAsync(f.FullName, token)
+          logger.LogDebug("Found migration {migrationPath}", f.FullName)
+          return migrationSerializer.DecodeText content
+        })
+        |> Async.Parallel
+
+      logger.LogInformation("Found migrations {migrations}", migrations.Length)
+
+      logger.LogInformation(
+        "Creating new virtual project {projectName}",
+        projectName
+      )
+
+      let! vProjectId =
+        vpr.InsertProject {
+          name = projectName
+          description = $"Imported from local ({projectName})"
+          connection = config.connection
+          tableName = config.tableName
+          driver = config.driver
         }
 
-        logger.LogDebug(
-          "Creating virtual migration {vMigration}",
-          vMigration.name
-        )
+      let! migrations =
+        migrations
+        |> Array.map(fun migration -> asyncEx {
+          let! token = Async.CancellationToken
 
-        return! vpr.InsertMigration vMigration token
+          let vMigration = {
+            id = Guid.NewGuid()
+            name = migration.name
+            timestamp = migration.timestamp
+            upContent = migration.upContent
+            downContent = migration.downContent
+            manualTransaction = migration.manualTransaction
+            projectId = UMX.untag vProjectId
+          }
 
-      })
-      |> Async.Parallel
+          logger.LogDebug(
+            "Creating virtual migration {vMigration}",
+            vMigration.name
+          )
 
-    logger.LogInformation(
-      "Created virtual project {projectName} with {migrations} migrations",
-      projectName,
-      migrations.Length
-    )
+          return! vpr.InsertMigration vMigration token
 
-    return vProjectId
-  }
+        })
+        |> Async.Parallel
+
+      logger.LogInformation(
+        "Created virtual project {projectName} with {migrations} migrations",
+        projectName,
+        migrations.Length
+      )
+
+      return vProjectId
+    }
 
   { new MigrondiUIFs with
 
@@ -192,7 +197,7 @@ let getVirtualFs
         let ct = defaultArg cancellationToken CancellationToken.None
         logger.LogDebug("Reading configuration for {readFrom}", readFrom)
         let guid = Guid.Parse readFrom
-        let! config = vpr.GetProjectById (UMX.tag<ProjectId> guid) ct
+        let! config = vpr.GetProjectByProjectId (UMX.tag<ProjectId> guid) ct
 
         match config with
         | None -> return failwith $"Project with id %s{readFrom} not found"
@@ -234,7 +239,7 @@ let getVirtualFs
         let ct = defaultArg cancellationToken CancellationToken.None
         logger.LogDebug("Writing configuration for {writeTo}", writeTo)
         let guid = Guid.Parse writeTo
-        let! project = vpr.GetProjectById (UMX.tag<ProjectId> guid) ct
+        let! project = vpr.GetProjectByProjectId (UMX.tag<ProjectId> guid) ct
 
         match project with
         | None -> return failwith $"Project with id %s{writeTo} not found"
@@ -302,7 +307,8 @@ let getVirtualFs
         )
 
         let! found = taskOption {
-          let! project = vpr.GetProjectById (UMX.tag<ProjectId> project) token
+          let! project =
+            vpr.GetProjectByProjectId (UMX.tag<ProjectId> project) token
 
           let! migrations =
             vpr.GetMigrations (UMX.tag<ProjectId> project.projectId) token
@@ -388,7 +394,7 @@ let getVirtualFs
           return projectRoot.FullName
       }
 
-      member _.ImportFromLocal(project: LocalProject) : CancellableTask<Guid> =
+      member _.ImportFromLocal(project: LocalProject) =
         importProjectFromPath project.migrondiConfigPath project.name
 
       member _.ImportFromLocal(projectConfigPath: string) =

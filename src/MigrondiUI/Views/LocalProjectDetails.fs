@@ -317,7 +317,7 @@ let buildDetailsView
   ) =
   asyncOption {
     let! cancellationToken = Async.CancellationToken
-    let! project = projects.GetProjectById projectId cancellationToken
+    let! project = projects.GetProjectByProjectId projectId cancellationToken
 
     logger.LogDebug("Project from repository: {project}", project)
 

@@ -12,6 +12,7 @@
     <Compile Include="VirtualFs.fs" />
     <Compile Include="MigrondiExt.fs" />
     <Compile Include="OsOperations.fs" />
+    <Compile Include="Commands.fs" />
     <Compile Include="Components/Toolbar.fs" />
     <Compile Include="Components/Fields.fs" />
     <Compile Include="Components/TextEditor.fs" />
