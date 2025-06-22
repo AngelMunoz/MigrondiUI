@@ -14,6 +14,7 @@ open Navs.Avalonia
 open MigrondiUI.MigrondiExt
 open SukiUI.Controls
 open SukiUI.Theme
+open MigrondiUI.Components
 
 [<NoComparison; NoEquality>]
 type AppEnvironment = {
@@ -137,12 +138,12 @@ type MigrondiUIAppHost(env: AppEnvironment) =
       .MenuItems(
         SukiSideMenuItem()
           .Tag(ProjectList)
-          .Icon(PathIcon(Data = SukiUI.Content.Icons.Menu))
+          .Icon(Icons.ListBox)
           .Header("Projects")
           .PageContent(content),
         SukiSideMenuItem()
           .Tag(NewProject)
-          .Icon(PathIcon(Data = SukiUI.Content.Icons.Plus))
+          .Icon(Icons.DatabasePlus)
           .Header("New Project")
           .PageContent(content)
       )
