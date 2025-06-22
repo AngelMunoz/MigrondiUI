@@ -8,8 +8,11 @@ open Microsoft.Extensions.Logging
 
 open IcedTasks
 
+open Avalonia
 open Avalonia.Controls
+open Avalonia.Layout
 open Avalonia.Platform.Storage
+open Avalonia.Styling
 
 open NXUI.Extensions
 
@@ -166,18 +169,20 @@ type NewProjectVM
     return vpid
   }
 
-type private LocalProjectTab
+type LocalProjectTab
   (
     handleSelectLocalProject: unit -> unit,
     handleCreateNewLocalProject: unit -> unit
   ) as this =
   inherit UserControl()
 
+
   do
+    this.Name <- nameof LocalProjectTab
+
     this.Content <-
       StackPanel()
-        .Spacing(10)
-        .Margin(10)
+        .Classes("LocalProjectTab_StackPanel")
         .Children(
           Button()
             .Content("Create New Local Project")
@@ -186,6 +191,16 @@ type private LocalProjectTab
             .Content("Select Local Project")
             .OnClickHandler(fun _ _ -> handleSelectLocalProject())
         )
+
+    this.ApplyStyles()
+
+  member private this.ApplyStyles() =
+    this.Styles.AddRange [
+      Style()
+        .Selector(_.OfType<StackPanel>().Class("LocalProjectTab_StackPanel"))
+        .SetStackLayoutSpacing(10.0)
+        .SetLayoutableMargin(Thickness 10.0)
+    ]
 
 type NewProjectView(vm: NewProjectVM, logger: ILogger, nav: INavigable<Control>) as this
   =
@@ -242,43 +257,56 @@ type NewProjectView(vm: NewProjectVM, logger: ILogger, nav: INavigable<Control>)
       logger.LogWarning("Navigation Failure: {error}", e.StringError())
   }
 
+
+  let tabControl =
+    TabControl()
+      .ItemsSource(
+        TabItem()
+          .Header("Local Project")
+          .Content(
+            GlassCard()
+              .Classes("Accent")
+              .Content(
+                LocalProjectTab(
+                  (fun () ->
+                    handleSelectLocalProject CreateLocal
+                    |> Async.StartImmediate),
+                  (fun () ->
+                    handleCreateNewLocalProject() |> Async.StartImmediate)
+                )
+              )
+          ),
+        TabItem()
+          .Header("Virtual Project")
+          .Content(
+            GlassCard()
+              .Classes("Accent")
+              .Content(
+                NewVirtualProjectForm(
+                  handleCreateVirtualProject >> Async.StartImmediate,
+                  (fun () ->
+                    handleSelectLocalProject ImportToVirtual
+                    |> Async.StartImmediate)
+                )
+              )
+          )
+      )
+
   do
-    let tabControl =
-      TabControl()
-        .ItemsSource(
-          TabItem()
-            .Header("Local Project")
-            .Content(
-              GlassCard()
-                .Classes("Accent")
-                .Content(
-                  LocalProjectTab(
-                    (fun () ->
-                      handleSelectLocalProject CreateLocal
-                      |> Async.StartImmediate),
-                    (fun () ->
-                      handleCreateNewLocalProject() |> Async.StartImmediate)
-                  )
-                )
-            ),
-          TabItem()
-            .Header("Virtual Project")
-            .Content(
-              GlassCard()
-                .Classes("Accent")
-                .Content(
-                  NewVirtualProjectForm(
-                    handleCreateVirtualProject >> Async.StartImmediate,
-                    (fun () ->
-                      handleSelectLocalProject ImportToVirtual
-                      |> Async.StartImmediate)
-                  )
-                )
-            )
-        )
 
     this.Name <- nameof NewProjectView
-    this.Content <- GlassCard().Content(tabControl).Margin(12)
+
+    this.Content <-
+      GlassCard().Classes("NewProjectView_GlassCard").Content(tabControl)
+
+    this.ApplyStyles()
+
+  member private this.ApplyStyles() =
+    this.Styles.AddRange [
+      Style()
+        .Selector(_.OfType<GlassCard>().Class("NewProjectView_GlassCard"))
+        .SetLayoutableMargin(Thickness 12.0)
+    ]
 
 let View
   (vm: NewProjectVM, logger: ILogger)
