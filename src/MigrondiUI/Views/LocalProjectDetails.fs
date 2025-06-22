@@ -25,12 +25,14 @@ open MigrondiUI.Database
 open MigrondiUI.Components
 open MigrondiUI.Components.MigrationRunnerToolbar
 open MigrondiUI.Components.Fields
+open SukiUI.Dialogs
 
 type LocalProjectDetailsVM
   (
     logger: ILogger<LocalProjectDetailsVM>,
     migrondi: IMigrondi,
-    project: LocalProject
+    project: LocalProject,
+    dm: ISukiDialogManager
   ) =
 
   let _migrations = cval [||]
@@ -156,11 +158,25 @@ type LocalProjectDetailsVM
     }
     |> handleException
 
-// Reusing shared component from SharedComponents module
+
+  member this.OnRunRequested() =
+    dm
+      .CreateDialog()
+      .SetTitle("Run Migrations")
+      .SetButtons(
+        DialogButton.Yes(fun _ ->
+          logger.LogDebug("Run migrations confirmed")
+          true),
+        DialogButton.No(fun _ ->
+          logger.LogDebug("Run migrations cancelled")
+          false)
+      )
+      .ShowDialog()
 
 let localProjectView
   (
     project: LocalProject,
+    onRunRequested: unit -> bool,
     onRunMigrationsRequested: ProjectDetails.RunMigrationKind * int -> unit
   ) : Control =
   let description = defaultArg project.description "No description"
@@ -202,7 +218,7 @@ let localProjectView
           TextBlock()
             .Text($"{project.name} - {description}")
             .VerticalAlignmentCenter(),
-          MigrationsRunnerToolbar(onRunMigrationsRequested)
+          MigrationsRunnerToolbar(onRunRequested, onRunMigrationsRequested)
             .VerticalAlignmentCenter()
         )
     )
@@ -284,7 +300,11 @@ type LProjectDetailsView(vm: LocalProjectDetailsVM, onNavigateBack) =
             .Column(0)
             .ColumnSpan(2)
             .HorizontalAlignmentStretch(),
-          localProjectView(vm.Project, onRunMigrationsRequested)
+          localProjectView(
+            vm.Project,
+            vm.OnRunRequested,
+            onRunMigrationsRequested
+          )
             .Row(1)
             .Column(0)
             .ColumnSpan(3)
@@ -313,6 +333,7 @@ let buildDetailsView
     logger: ILogger<LocalProjectDetailsVM>,
     mLogger: ILogger<IMigrondi>,
     projects: ILocalProjectRepository,
+    dm: ISukiDialogManager,
     onNavigateBack: unit -> unit
   ) =
   asyncOption {
@@ -328,7 +349,7 @@ let buildDetailsView
 
     let migrondi = Migrondi.MigrondiFactory(config, projectRoot, mLogger)
 
-    let vm = LocalProjectDetailsVM(logger, migrondi, project)
+    let vm = LocalProjectDetailsVM(logger, migrondi, project, dm)
     return LProjectDetailsView(vm, onNavigateBack) :> Control
   }
 
@@ -346,7 +367,8 @@ let View
   (
     logger: ILogger<LocalProjectDetailsVM>,
     mLogger: ILogger<IMigrondi>,
-    projects: ILocalProjectRepository
+    projects: ILocalProjectRepository,
+    dm: ISukiDialogManager
   )
   (context: RouteContext)
   (nav: INavigable<Control>)
@@ -375,7 +397,14 @@ let View
 
     asyncEx {
       match!
-        buildDetailsView(projectId, logger, mLogger, projects, onNavigateBack)
+        buildDetailsView(
+          projectId,
+          logger,
+          mLogger,
+          projects,
+          dm,
+          onNavigateBack
+        )
       with
       | Some builtView -> view.setValue(builtView)
       | None -> view.setValue(buildProjectNotFound projectId)

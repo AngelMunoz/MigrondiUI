@@ -23,6 +23,7 @@ open FsToolkit.ErrorHandling
 
 open Navs
 open Migrondi.Core
+open FSharp.Data.Adaptive
 
 type AsyncOptionBuilder with
 
@@ -47,6 +48,7 @@ type AsyncOptionBuilder with
     |> Async.map (function
       | null -> None
       | value -> Some value)
+
 
 type Styles with
   member inline this.Load(source: string) =
