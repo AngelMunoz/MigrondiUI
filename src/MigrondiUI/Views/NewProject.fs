@@ -166,46 +166,39 @@ type NewProjectVM
     return vpid
   }
 
-let private localProjectTab
+type private LocalProjectTab
   (
     handleSelectLocalProject: unit -> unit,
     handleCreateNewLocalProject: unit -> unit
-  ) =
-  StackPanel()
-    .Spacing(10)
-    .Margin(10)
-    .Children(
-      Button()
-        .Content("Create New Local Project")
-        .OnClickHandler(fun _ _ -> handleCreateNewLocalProject()),
-      Button()
-        .Content("Select Local Project")
-        .OnClickHandler(fun _ _ -> handleSelectLocalProject())
-    )
+  ) as this =
+  inherit UserControl()
 
-let private virtualProjectTab
-  (
-    handleCreateVirtualProject: NewVirtualProjectArgs -> unit,
-    handleImportToVirtual: unit -> unit
-  ) =
-  NewVirtualProjectForm(handleCreateVirtualProject, handleImportToVirtual)
+  do
+    this.Content <-
+      StackPanel()
+        .Spacing(10)
+        .Margin(10)
+        .Children(
+          Button()
+            .Content("Create New Local Project")
+            .OnClickHandler(fun _ _ -> handleCreateNewLocalProject()),
+          Button()
+            .Content("Select Local Project")
+            .OnClickHandler(fun _ _ -> handleSelectLocalProject())
+        )
 
-
-let View
-  (vm: NewProjectVM, logger: ILogger)
-  _
-  (nav: INavigable<Control>)
-  : Control =
-  let view = UserControl()
+type NewProjectView(vm: NewProjectVM, logger: ILogger, nav: INavigable<Control>) as this
+  =
+  inherit UserControl()
 
   let handleSelectLocalProject(target: LocalProjectTarget) = asyncEx {
     let! projectId = asyncEx {
       match target with
       | CreateLocal ->
-        let! guid = vm.LoadLocalProject view
+        let! guid = vm.LoadLocalProject this
         return guid |> Option.map UMX.untag
       | ImportToVirtual ->
-        let! guid = vm.ImportToVirtualProject view
+        let! guid = vm.ImportToVirtualProject this
         return guid |> Option.map(UMX.untag)
     }
 
@@ -227,7 +220,7 @@ let View
   }
 
   let handleCreateNewLocalProject() = asyncEx {
-    let! projectId = vm.CreateNewLocalProject view
+    let! projectId = vm.CreateNewLocalProject this
 
     match projectId with
     | None ->
@@ -249,29 +242,47 @@ let View
       logger.LogWarning("Navigation Failure: {error}", e.StringError())
   }
 
-  let tabControl =
-    TabControl()
-      .ItemsSource(
-        TabItem()
-          .Header("Local Project")
-          .Content(
-            localProjectTab(
-              (fun () ->
-                handleSelectLocalProject CreateLocal |> Async.StartImmediate),
-              (fun () -> handleCreateNewLocalProject() |> Async.StartImmediate)
+  do
+    let tabControl =
+      TabControl()
+        .ItemsSource(
+          TabItem()
+            .Header("Local Project")
+            .Content(
+              GlassCard()
+                .Classes("Accent")
+                .Content(
+                  LocalProjectTab(
+                    (fun () ->
+                      handleSelectLocalProject CreateLocal
+                      |> Async.StartImmediate),
+                    (fun () ->
+                      handleCreateNewLocalProject() |> Async.StartImmediate)
+                  )
+                )
+            ),
+          TabItem()
+            .Header("Virtual Project")
+            .Content(
+              GlassCard()
+                .Classes("Accent")
+                .Content(
+                  NewVirtualProjectForm(
+                    handleCreateVirtualProject >> Async.StartImmediate,
+                    (fun () ->
+                      handleSelectLocalProject ImportToVirtual
+                      |> Async.StartImmediate)
+                  )
+                )
             )
-          ),
-        TabItem()
-          .Header("Virtual Project")
-          .Content(
-            virtualProjectTab(
-              (fun args ->
-                handleCreateVirtualProject args |> Async.StartImmediate),
-              (fun () ->
-                handleSelectLocalProject ImportToVirtual
-                |> Async.StartImmediate)
-            )
-          )
-      )
+        )
 
-  view.Name("NewProject").Content(GlassCard().Content(tabControl))
+    this.Name <- nameof NewProjectView
+    this.Content <- GlassCard().Content(tabControl).Margin(12)
+
+let View
+  (vm: NewProjectVM, logger: ILogger)
+  _
+  (nav: INavigable<Control>)
+  : Control =
+  NewProjectView(vm, logger, nav)

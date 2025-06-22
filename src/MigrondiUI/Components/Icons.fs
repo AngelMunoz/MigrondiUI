@@ -1,3 +1,5 @@
+/// https://pictogrammers.com/library/mdi/
+///
 /// Material Design Icons are provided under the Apache License 2.0
 /// <see href="https://pictogrammers.com/docs/general/license/">License</see>
 module MigrondiUI.Components.Icons
