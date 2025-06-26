@@ -4,6 +4,7 @@ open System
 
 open Avalonia
 open Avalonia.Controls
+open Avalonia.Layout
 open Avalonia.Styling
 open FSharp.Data.Adaptive
 open IcedTasks
@@ -20,6 +21,7 @@ type ApplyPendingButtonArgs = {
 type ApplyPendingButton(args: ApplyPendingButtonArgs) =
   inherit UserControl()
   let isEnabled = cval true
+
   let onRunMigrationsRequested kind =
     asyncEx {
       isEnabled.setValue false
@@ -47,7 +49,7 @@ type ApplyPendingButton(args: ApplyPendingButtonArgs) =
 
     base.Content <-
       Button()
-        .Classes("Warning")
+        .Classes("Accent", "Outlined")
         .IsEnabled(isEnabled |> AVal.toBinding)
         .ShowProgress(isEnabled |> AVal.map not |> AVal.toBinding)
         .Content(text |> AVal.toBinding)
@@ -136,9 +138,10 @@ type MigrationsRunnerToolbar
       // Main toolbar panel styles
       Style()
         .Selector(_.OfType<StackPanel>().Class("MigrationsRunnerToolbarPanel"))
-        .SetStackLayoutOrientation(Layout.Orientation.Horizontal)
+        .SetStackLayoutOrientation(Orientation.Horizontal)
         .SetStackLayoutSpacing(8)
         .SetLayoutableMargin(Thickness(0, 4, 0, 8))
+        .SetLayoutableVerticalAlignment(VerticalAlignment.Center)
 
       // Button styles
       Style()
@@ -153,11 +156,11 @@ type MigrationsRunnerToolbar
       Style()
         .Selector(_.OfType<CheckBox>())
         .SetLayoutableMargin(Thickness(0, 0, 8, 0))
-        .SetLayoutableVerticalAlignment(Layout.VerticalAlignment.Center)
+        .SetLayoutableVerticalAlignment(VerticalAlignment.Center)
 
       // NumericUpDown styles
       Style()
         .Selector(_.OfType<NumericUpDown>())
         .SetLayoutableWidth(120)
-        .SetLayoutableVerticalAlignment(Layout.VerticalAlignment.Center)
+        .SetLayoutableVerticalAlignment(VerticalAlignment.Center)
     ]

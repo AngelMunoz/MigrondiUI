@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Threading.Tasks
 
+open Avalonia.Controls.Notifications
 open Microsoft.Extensions.Logging
 
 open Avalonia.Controls
@@ -20,17 +21,19 @@ open Navs.Avalonia
 open Migrondi.Core
 open MigrondiUI
 open MigrondiUI.Projects
-open MigrondiUI.Database
 open MigrondiUI.Components
 open MigrondiUI.Components.MigrationRunnerToolbar
 
 open MigrondiUI.MigrondiExt
+open SukiUI.Controls
+open SukiUI.Dialogs
 
 type VirtualProjectDetailsVM
   (
     logger: ILogger<VirtualProjectDetailsVM>,
     migrondi: IMigrondiUI,
     vprojects: IVirtualProjectRepository,
+    dialogManager: ISukiDialogManager,
     project: VirtualProject
   ) =
   let _migrations = cval [||]
@@ -189,10 +192,32 @@ type VirtualProjectDetailsVM
       return ()
   }
 
+  member _.ConfirmRun(args: ProjectDetails.RunMigrationKind) = asyncEx {
+    match args with
+    | ProjectDetails.RunMigrationKind.DryUp
+    | ProjectDetails.RunMigrationKind.DryDown -> return true
+    | ProjectDetails.RunMigrationKind.Up
+    | ProjectDetails.RunMigrationKind.Down ->
+      let! token = Async.CancellationToken
+
+      return!
+        dialogManager
+          .CreateDialog()
+          .WithTitle("This is a potentially destructive operation")
+          .OfType(NotificationType.Warning)
+          .WithContent(
+            TextBlock().Classes("h4").Text("Are you sure you want to continue?")
+          )
+          .WithYesNoResult("Yes", "No")
+          .TryShowAsync(token)
+
+  }
+
 let virtualProjectView
   (
     project: VirtualProject aval,
-    onRunMigrationsRequested: ProjectDetails.RunMigrationKind * int -> unit,
+    onMigrationsRunRequested: ProjectDetails.RunMigrationKind -> Async<bool>,
+    onApplyMigrations: ProjectDetails.RunMigrationKind * int -> Async<unit>,
     onSave: VirtualProject -> Async<unit>
   ) : Control =
   let projectDescription =
@@ -216,12 +241,15 @@ let virtualProjectView
         .Children(
           TextBlock()
             .Text(projectDescription |> AVal.toBinding)
+            .VerticalAlignmentCenter(),
+          MigrationsRunnerToolbar(onMigrationsRunRequested, onApplyMigrations)
             .VerticalAlignmentCenter()
-          // MigrationsRunnerToolbar(onRunMigrationsRequested)
-          //   .VerticalAlignmentCenter()
         )
     )
-    .Content(VirtualProjectForm.VirtualProjectForm(project, onSave))
+    .Content(
+      GlassCard()
+        .Content(VirtualProjectForm.VirtualProjectForm(project, onSave))
+    )
     .HorizontalAlignmentStretch()
     .VerticalAlignmentTop()
 
@@ -237,6 +265,7 @@ let toolbar
     TextBox()
       .Name("New Migration Name:")
       .Watermark("Enter migration name")
+      .Height(28)
       .Width(200)
       .AcceptsReturn(false)
       .OnTextChangedHandler(fun txtBox _ ->
@@ -247,6 +276,7 @@ let toolbar
 
   let createButton =
     Button()
+      .Classes("Accent", "Outlined")
       .Content("Create Migration")
       .IsEnabled(isEnabled |> AVal.toBinding)
       .OnClickHandler(fun _ _ ->
@@ -254,15 +284,22 @@ let toolbar
         onNewMigration text
         nameTextBox.Text <- "")
 
-  Toolbar
-    .get(Spacing 8., Orientation Horizontal)
-    .Children(
-      Button().Content("Back").OnClickHandler(fun _ _ -> onNavigateBack()),
-      Button().Content("Refresh").OnClickHandler(fun _ _ -> onRefresh()),
-      nameTextBox,
-      createButton
-    )
+  Grid()
+    .ColumnDefinitions("Auto,Auto,Auto,Auto")
+    .ColumnSpacing(8.0)
     .HorizontalAlignmentStretch()
+    .Children(
+      Button()
+        .Content("Back")
+        .OnClickHandler(fun _ _ -> onNavigateBack())
+        .Column(0),
+      Button()
+        .Content("Refresh")
+        .OnClickHandler(fun _ _ -> onRefresh())
+        .Column(1),
+      createButton.Column(2),
+      nameTextBox.Column(3)
+    )
 
 type VProjectDetailsView
   (logger: ILogger, vm: VirtualProjectDetailsVM, onNavigateBack) =
@@ -304,8 +341,9 @@ type VProjectDetailsView
         onRemoveRequested migrationStatus.Migration
       ))
 
-  let onRunMigrationsRequested args =
-    vm.RunMigrations args |> Async.StartImmediate
+  let onMigrationsRunRequested args = vm.ConfirmRun args
+
+  let onApplyMigrations args = vm.RunMigrations args
 
   let onSaveProject project = vm.UpdateProject project
 
@@ -319,14 +357,16 @@ type VProjectDetailsView
         .RowDefinitions("Auto,Auto,Auto,*")
         .ColumnDefinitions("Auto,*,*")
         .Children(
-          toolbar(onNavigateBack, onNewMigration, onRefresh)
+          GlassCard()
+            .Content(toolbar(onNavigateBack, onNewMigration, onRefresh))
             .Row(0)
             .Column(0)
             .ColumnSpan(3)
             .HorizontalAlignmentStretch(),
           virtualProjectView(
             vm.Project,
-            onRunMigrationsRequested,
+            onMigrationsRunRequested,
+            onApplyMigrations,
             onSaveProject
           )
             .Row(1)
@@ -357,6 +397,7 @@ let buildDetailsView
     projectId: Guid<VProjectId>,
     logger: ILogger<VirtualProjectDetailsVM>,
     projects: IVirtualProjectRepository,
+    dialogManager: ISukiDialogManager,
     vMigrondiFactory: MigrondiConfig * string * Guid -> IMigrondiUI,
     onNavigateBack: unit -> unit
   ) =
@@ -388,7 +429,15 @@ let buildDetailsView
 
       vMigrondiFactory(project.ToMigrondiConfig(), projectRoot, project.id)
 
-    let vm = VirtualProjectDetailsVM(logger, migrondi, projects, project)
+    let vm =
+      VirtualProjectDetailsVM(
+        logger,
+        migrondi,
+        projects,
+        dialogManager,
+        project
+      )
+
     return VProjectDetailsView(logger, vm, onNavigateBack) :> Control
   }
 
@@ -406,6 +455,7 @@ let View
   (
     logger: ILogger<VirtualProjectDetailsVM>,
     projects: IVirtualProjectRepository,
+    dialogManager: ISukiDialogManager,
     vMigrondiFactory: MigrondiConfig * string * Guid -> IMigrondiUI
   )
   (context: RouteContext)
@@ -440,6 +490,7 @@ let View
           projectId,
           logger,
           projects,
+          dialogManager,
           vMigrondiFactory,
           onNavigateBack
         )

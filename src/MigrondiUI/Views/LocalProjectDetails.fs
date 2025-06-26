@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Threading.Tasks
 
+open Avalonia.Controls.Notifications
 open Microsoft.Extensions.Logging
 
 open Avalonia.Controls
@@ -21,7 +22,6 @@ open Migrondi.Core
 
 open MigrondiUI
 open MigrondiUI.Projects
-open MigrondiUI.Database
 open MigrondiUI.Components
 open MigrondiUI.Components.MigrationRunnerToolbar
 open MigrondiUI.Components.Fields
@@ -31,7 +31,7 @@ open SukiUI.Dialogs
 type LocalProjectDetailsVM
   (
     logger: ILogger<LocalProjectDetailsVM>,
-    dialogManager: SukiUI.Dialogs.ISukiDialogManager,
+    dialogManager: ISukiDialogManager,
     migrondi: IMigrondi,
     project: LocalProject
   ) =
@@ -175,6 +175,7 @@ type LocalProjectDetailsVM
         dialogManager
           .CreateDialog()
           .WithTitle("This is a potentially destructive operation")
+          .OfType(NotificationType.Warning)
           .WithContent(
             TextBlock().Classes("h4").Text("Are you sure you want to continue?")
           )
@@ -227,6 +228,7 @@ let localProjectView
       StackPanel()
         .Spacing(8)
         .OrientationHorizontal()
+        .VerticalAlignmentCenter()
         .Children(
           TextBlock()
             .Text($"{project.name} - {description}")
@@ -352,15 +354,13 @@ type LProjectDetailsView(vm: LocalProjectDetailsVM, onNavigateBack) =
             .VerticalAlignmentTop()
             .HorizontalAlignmentStretch()
             .MarginY(8),
-          GlassCard()
-            .Content(
-              ProjectDetails.MigrationsPanel(
-                currentShow = vm.CurrentShow,
-                migrations = vm.Migrations,
-                lastDryRun = vm.LastDryRun,
-                migrationsView = ProjectDetails.migrationListView,
-                dryRunView = ProjectDetails.dryRunListView
-              )
+          ProjectDetails
+            .MigrationsPanel(
+              currentShow = vm.CurrentShow,
+              migrations = vm.Migrations,
+              lastDryRun = vm.LastDryRun,
+              migrationsView = ProjectDetails.migrationListView,
+              dryRunView = ProjectDetails.dryRunListView
             )
             .Row(2)
             .Column(0)

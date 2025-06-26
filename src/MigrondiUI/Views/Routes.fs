@@ -5,15 +5,12 @@ open System
 open Microsoft.Extensions.Logging
 
 open Avalonia.Controls
-open Avalonia.Interactivity
-open NXUI
 open NXUI.Extensions
 
 open Navs.Avalonia
 
 open MigrondiUI.MigrondiExt
 open SukiUI.Controls
-open SukiUI.Theme
 open MigrondiUI.Components
 
 [<NoComparison; NoEquality>]
@@ -73,11 +70,12 @@ let private vProjectDetailsView appEnvironment =
         lf = lf
         vProjects = vProjects
         vMigrondiFactory = vMigrondiFactory
+        dialogManager = dialogManager
       } =
     appEnvironment
 
   let logger = lf.CreateLogger<VirtualProjectDetails.VirtualProjectDetailsVM>()
-  VirtualProjectDetails.View(logger, vProjects, vMigrondiFactory)
+  VirtualProjectDetails.View(logger, vProjects, dialogManager, vMigrondiFactory)
 
 
 

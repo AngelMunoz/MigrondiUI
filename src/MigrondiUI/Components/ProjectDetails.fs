@@ -16,6 +16,7 @@ open Migrondi.Core
 open MigrondiUI.Components.Fields
 open MigrondiUI.Components.TextEditor
 open Avalonia
+open SukiUI.Controls
 
 
 [<Struct>]
@@ -123,7 +124,7 @@ let migrationListView(migrations: MigrationStatus[]) : Control =
       .ItemsSource(migrations)
       .ItemTemplate(
         FuncDataTemplate<MigrationStatus>(fun migrationStatus _ ->
-          MigrationStatusView migrationStatus)
+          GlassCard().Content(MigrationStatusView(migrationStatus)).MarginY(8))
       )
 
 let templatedMigrationListView
@@ -157,7 +158,8 @@ let dryRunListView(currentShow, migrations: Migration[]) : Control =
             .ItemsSource(migrations |> Array.map(fun m -> m, kind))
             .ItemTemplate(
               FuncDataTemplate<Migration * RunMigrationKind>
-                (fun (migration, kind) _ -> DryRunView(kind, migration))
+                (fun (migration, kind) _ ->
+                  GlassCard().Content(DryRunView(kind, migration)).MarginY(8))
             ),
           TextBlock().Text
             "Simulation completed. No changes were made to the database."
