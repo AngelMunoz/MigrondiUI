@@ -11,26 +11,20 @@ open Avalonia.Interactivity
 
 
 [<AvaloniaFact>]
-let ``Pending Button with dryRun is false will have a confirm apply button``() =
+let ``Pending Button with RunMigrationKind.Up will have an apply pending button``() =
   let mutable clicked = false
   let mutable clicked2 = false
 
   let pendingButton =
-    applyPendingButton(
-      AVal.constant false,
-      (fun _ -> clicked <- true),
-      (fun () ->
-        clicked2 <- true
-        0)
-    )
+    ApplyPendingButton({
+      kind = AVal.constant(RunMigrationKind.Up)
+      onMigrationRunRequested = (fun _ -> async { clicked <- true; return true })
+      onApplyMigrations = (fun _ -> async { clicked2 <- true; return () })
+    })
 
-  let splitButton = pendingButton.Content :?> SplitButton
-
-  let flyout = splitButton.Flyout :?> Flyout
-
-  let confirmBtn = flyout.Content :?> Button
+  let confirmBtn = pendingButton.Content :?> Button
   Assert.NotNull(confirmBtn)
-  Assert.Equal("Confirm Apply", $"{confirmBtn.Content}")
+  Assert.Equal("Apply Pending", $"{confirmBtn.Content}")
 
   confirmBtn.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
 
@@ -38,18 +32,16 @@ let ``Pending Button with dryRun is false will have a confirm apply button``() =
   Assert.True(clicked2)
 
 [<AvaloniaFact>]
-let ``Pending Button with dryRun is true will have a dry run button``() =
+let ``Pending Button with RunMigrationKind.DryUp will have a dry run button``() =
   let mutable clicked = false
   let mutable clicked2 = false
 
   let pendingButton =
-    applyPendingButton(
-      AVal.constant true,
-      (fun _ -> clicked <- true),
-      (fun () ->
-        clicked2 <- true
-        0)
-    )
+    ApplyPendingButton({
+      kind = AVal.constant(RunMigrationKind.DryUp)
+      onMigrationRunRequested = (fun _ -> async { clicked <- true; return true })
+      onApplyMigrations = (fun _ -> async { clicked2 <- true; return () })
+    })
 
   let button = pendingButton.Content :?> Button
 
@@ -63,52 +55,44 @@ let ``Pending Button with dryRun is true will have a dry run button``() =
 
 
 [<AvaloniaFact>]
-let ``Rollback Button with dryRun is false will have a confirm rollback button``
+let ``Rollback Button with RunMigrationKind.Down will have a confirm rollback button``
   ()
   =
   let mutable clicked = false
   let mutable clicked2 = false
 
   let buttonControl =
-    rollbackButton(
-      AVal.constant false,
-      (fun _ -> clicked <- true),
-      (fun () ->
-        clicked2 <- true
-        0)
-    )
+    ApplyPendingButton({
+      kind = AVal.constant(RunMigrationKind.Down)
+      onMigrationRunRequested = (fun _ -> async { clicked <- true; return true })
+      onApplyMigrations = (fun _ -> async { clicked2 <- true; return () })
+    })
 
-  let splitButton = buttonControl.Content :?> SplitButton
+  let button = buttonControl.Content :?> Button
+  Assert.NotNull(button)
+  Assert.Equal("Rollback Pending", $"{button.Content}")
 
-  let flyout = splitButton.Flyout :?> Flyout
-
-  let confirmBtn = flyout.Content :?> Button
-  Assert.NotNull(confirmBtn)
-  Assert.Equal("Confirm Rollback", $"{confirmBtn.Content}")
-
-  confirmBtn.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
+  button.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
 
   Assert.True(clicked)
   Assert.True(clicked2)
 
 [<AvaloniaFact>]
-let ``Rollback Button with dryRun is true will have a dry run button``() =
+let ``Rollback Button with RunMigrationKind.DryDown will have a dry run button``() =
   let mutable clicked = false
   let mutable clicked2 = false
 
   let buttonControl =
-    rollbackButton(
-      AVal.constant true,
-      (fun _ -> clicked <- true),
-      (fun () ->
-        clicked2 <- true
-        0)
-    )
+    ApplyPendingButton({
+      kind = AVal.constant(RunMigrationKind.DryDown)
+      onMigrationRunRequested = (fun _ -> async { clicked <- true; return true })
+      onApplyMigrations = (fun _ -> async { clicked2 <- true; return () })
+    })
 
   let button = buttonControl.Content :?> Button
 
   Assert.NotNull(button)
-  Assert.Equal("Rollback (Dry Run)", $"{button.Content}")
+  Assert.Equal("Rollback Pending (Dry Run)", $"{button.Content}")
 
   button.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
 
@@ -139,16 +123,19 @@ let ``CheckBox will update cval on change``() =
   Assert.True(actual)
 
 [<AvaloniaFact>]
-let ``MigrationsRunnerToolbar - Apply button with dryRun checked calls back with DryUp``
+let ``MigrationsRunnerToolbar - Apply button with dryRun enabled calls back with RunMigrationKind.DryUp``
   ()
   =
   let mutable calledKind = Unchecked.defaultof<RunMigrationKind>
   let mutable calledSteps = 0
 
   let toolbar =
-    MigrationsRunnerToolbar(fun (kind, steps) ->
-      calledKind <- kind
-      calledSteps <- steps)
+    MigrationsRunnerToolbar(
+      (fun _ -> async { return true }),
+      (fun (kind, steps) ->
+        calledKind <- kind
+        calledSteps <- steps
+        async { return () }))
 
   // Find the checkbox and check it
   let checkbox =
@@ -168,42 +155,45 @@ let ``MigrationsRunnerToolbar - Apply button with dryRun checked calls back with
   Assert.Equal(1, calledSteps) // Default value
 
 [<AvaloniaFact>]
-let ``MigrationsRunnerToolbar - Apply button with dryRun unchecked calls back with Up after confirmation``
+let ``MigrationsRunnerToolbar - Apply button with dryRun disabled calls back with RunMigrationKind.Up after confirmation``
   ()
   =
   let mutable calledKind = Unchecked.defaultof<RunMigrationKind>
   let mutable calledSteps = 0
 
   let toolbar =
-    MigrationsRunnerToolbar(fun (kind, steps) ->
-      calledKind <- kind
-      calledSteps <- steps)
+    MigrationsRunnerToolbar(
+      (fun _ -> async { return true }),
+      (fun (kind, steps) ->
+        calledKind <- kind
+        calledSteps <- steps
+        async { return () }))
 
-  // Find and click the confirm apply button
-  let applySplitButton =
+  // Find and click the apply button
+  let applyButton =
     toolbar.Content :?> StackPanel
     |> fun sp -> sp.Children[0] :?> UserControl
-    |> fun uc -> uc.Content :?> SplitButton
+    |> fun uc -> uc.Content :?> Button
 
-  let flyout = applySplitButton.Flyout :?> Flyout
-  let confirmBtn = flyout.Content :?> Button
-
-  confirmBtn.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
+  applyButton.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
 
   Assert.Equal(RunMigrationKind.Up, calledKind)
   Assert.Equal(1, calledSteps) // Default value
 
 [<AvaloniaFact>]
-let ``MigrationsRunnerToolbar - Rollback button with dryRun checked calls back with DryDown``
+let ``MigrationsRunnerToolbar - Rollback button with dryRun enabled calls back with RunMigrationKind.DryDown``
   ()
   =
   let mutable calledKind = Unchecked.defaultof<RunMigrationKind>
   let mutable calledSteps = 0
 
   let toolbar =
-    MigrationsRunnerToolbar(fun (kind, steps) ->
-      calledKind <- kind
-      calledSteps <- steps)
+    MigrationsRunnerToolbar(
+      (fun _ -> async { return true }),
+      (fun (kind, steps) ->
+        calledKind <- kind
+        calledSteps <- steps
+        async { return () }))
 
   // Find the checkbox and check it
   let checkbox =
@@ -223,27 +213,27 @@ let ``MigrationsRunnerToolbar - Rollback button with dryRun checked calls back w
   Assert.Equal(1, calledSteps) // Default value
 
 [<AvaloniaFact>]
-let ``MigrationsRunnerToolbar - Rollback button with dryRun unchecked calls back with Down after confirmation``
+let ``MigrationsRunnerToolbar - Rollback button with dryRun disabled calls back with RunMigrationKind.Down after confirmation``
   ()
   =
   let mutable calledKind = Unchecked.defaultof<RunMigrationKind>
   let mutable calledSteps = 0
 
   let toolbar =
-    MigrationsRunnerToolbar(fun (kind, steps) ->
-      calledKind <- kind
-      calledSteps <- steps)
+    MigrationsRunnerToolbar(
+      (fun _ -> async { return true }),
+      (fun (kind, steps) ->
+        calledKind <- kind
+        calledSteps <- steps
+        async { return () }))
 
-  // Find and click the confirm rollback button
-  let rollbackSplitButton =
+  // Find and click the rollback button
+  let rollbackButton =
     toolbar.Content :?> StackPanel
     |> fun sp -> sp.Children[1] :?> UserControl
-    |> fun uc -> uc.Content :?> SplitButton
+    |> fun uc -> uc.Content :?> Button
 
-  let flyout = rollbackSplitButton.Flyout :?> Flyout
-  let confirmBtn = flyout.Content :?> Button
-
-  confirmBtn.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
+  rollbackButton.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
 
   Assert.Equal(RunMigrationKind.Down, calledKind)
   Assert.Equal(1, calledSteps) // Default value
@@ -254,9 +244,12 @@ let ``MigrationsRunnerToolbar - Steps value is passed to callback``() =
   let mutable calledSteps = 0
 
   let toolbar =
-    MigrationsRunnerToolbar(fun (kind, steps) ->
-      calledKind <- kind
-      calledSteps <- steps)
+    MigrationsRunnerToolbar(
+      (fun _ -> async { return true }),
+      (fun (kind, steps) ->
+        calledKind <- kind
+        calledSteps <- steps
+        async { return () }))
 
   // Set the numeric up/down control value
   let numericUpDown =
@@ -264,7 +257,7 @@ let ``MigrationsRunnerToolbar - Steps value is passed to callback``() =
 
   numericUpDown.SetCurrentValue(NumericUpDown.ValueProperty, 5M)
 
-  // Click the apply button with dry run
+  // Click the apply button with dry run enabled (resulting in RunMigrationKind.DryUp)
   let checkbox =
     toolbar.Content :?> StackPanel |> fun sp -> sp.Children[2] :?> CheckBox
 
