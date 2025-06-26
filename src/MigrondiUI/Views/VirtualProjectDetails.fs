@@ -216,9 +216,9 @@ let virtualProjectView
         .Children(
           TextBlock()
             .Text(projectDescription |> AVal.toBinding)
-            .VerticalAlignmentCenter(),
-          MigrationsRunnerToolbar(onRunMigrationsRequested)
             .VerticalAlignmentCenter()
+          // MigrationsRunnerToolbar(onRunMigrationsRequested)
+          //   .VerticalAlignmentCenter()
         )
     )
     .Content(VirtualProjectForm.VirtualProjectForm(project, onSave))

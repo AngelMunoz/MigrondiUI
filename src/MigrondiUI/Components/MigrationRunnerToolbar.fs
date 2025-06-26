@@ -1,4 +1,4 @@
-﻿module MigrondiUI.Components.MigrationRunnerToolbar
+module MigrondiUI.Components.MigrationRunnerToolbar
 
 open System
 
@@ -6,65 +6,53 @@ open Avalonia
 open Avalonia.Controls
 open Avalonia.Styling
 open FSharp.Data.Adaptive
+open IcedTasks
 open NXUI.Extensions
 open Navs.Avalonia
 open MigrondiUI.Components.ProjectDetails
 
-let applyPendingButton(dryRun, onRunMigrationsRequested, getIntValue) =
-  let btn =
-    dryRun
-    |> AVal.map(fun dryRun ->
-      if dryRun then
-        Button()
-          .Content("Apply Pending (Dry Run)")
-          .OnClickHandler(fun _ _ ->
-            onRunMigrationsRequested(RunMigrationKind.DryUp, getIntValue()))
-        :> Control
-      else
-        SplitButton()
-          .Content("Apply Pending")
-          .Flyout(
-            Flyout()
-              .Content(
-                Button()
-                  .Content("Confirm Apply")
-                  .OnClickHandler(fun _ _ ->
-                    onRunMigrationsRequested(
-                      RunMigrationKind.Up,
-                      getIntValue()
-                    ))
-              )
-          ))
+type ApplyPendingButtonArgs = {
+  kind: RunMigrationKind aval
+  onMigrationRunRequested: RunMigrationKind -> Async<bool>
+  onApplyMigrations: RunMigrationKind -> Async<unit>
+}
 
-  UserControl().Name("ApplyPendingButton").Content(btn |> AVal.toBinding)
+type ApplyPendingButton(args: ApplyPendingButtonArgs) =
+  inherit UserControl()
+  let isEnabled = cval true
+  let onRunMigrationsRequested kind =
+    asyncEx {
+      isEnabled.setValue false
+      let! runApproved = args.onMigrationRunRequested kind
 
-let rollbackButton(dryRun, onRunMigrationsRequested, getIntValue) =
-  let btn =
-    dryRun
-    |> AVal.map(fun dryRun ->
-      if dryRun then
-        Button()
-          .Content("Rollback (Dry Run)")
-          .OnClickHandler(fun _ _ ->
-            onRunMigrationsRequested(RunMigrationKind.DryDown, getIntValue()))
-        :> Control
-      else
-        SplitButton()
-          .Content("Rollback")
-          .Flyout(
-            Flyout()
-              .Content(
-                Button()
-                  .Content("Confirm Rollback")
-                  .OnClickHandler(fun _ _ ->
-                    onRunMigrationsRequested(
-                      RunMigrationKind.Down,
-                      getIntValue()
-                    ))
-              )
-          ))
+      if runApproved then
+        do! args.onApplyMigrations kind
 
-  UserControl().Name("RollbackButton").Content(btn |> AVal.toBinding)
+      isEnabled.setValue true
+      return ()
+    }
+    |> Async.StartImmediate
+
+  let text =
+    args.kind
+    |> AVal.map(fun kind ->
+      match kind with
+      | RunMigrationKind.DryUp -> "Apply Pending (Dry Run)"
+      | RunMigrationKind.DryDown -> "Rollback Pending (Dry Run)"
+      | RunMigrationKind.Up -> "Apply Pending"
+      | RunMigrationKind.Down -> "Rollback Pending")
+
+  do
+    base.Name <- nameof ApplyPendingButton
+
+    base.Content <-
+      Button()
+        .Classes("Warning")
+        .IsEnabled(isEnabled |> AVal.toBinding)
+        .ShowProgress(isEnabled |> AVal.map not |> AVal.toBinding)
+        .Content(text |> AVal.toBinding)
+        .OnClickHandler(fun _ _ ->
+          onRunMigrationsRequested(args.kind |> AVal.force))
 
 let numericUpDown(steps: _ cval) =
   NumericUpDown()
@@ -92,7 +80,10 @@ let checkBox(dryRun: _ cval) =
 
 
 type MigrationsRunnerToolbar
-  (onRunMigrationsRequested: RunMigrationKind * int -> unit) as this =
+  (
+    onRunMigrationsRequested: RunMigrationKind -> Async<bool>,
+    onApplyMigrations: RunMigrationKind * int -> Async<unit>
+  ) as this =
   inherit UserControl()
   let dryRun = cval false
   let steps = cval 1M
@@ -104,6 +95,27 @@ type MigrationsRunnerToolbar
     with :? OverflowException ->
       1
 
+  let upArgs = {
+    kind =
+      dryRun
+      |> AVal.map(fun d ->
+        if d then RunMigrationKind.DryUp else RunMigrationKind.Up)
+    onMigrationRunRequested = onRunMigrationsRequested
+    onApplyMigrations = fun kind -> onApplyMigrations(kind, getIntValue())
+  }
+
+  let downArgs = {
+    kind =
+      dryRun
+      |> AVal.map(fun d ->
+        if d then
+          RunMigrationKind.DryDown
+        else
+          RunMigrationKind.Down)
+    onMigrationRunRequested = onRunMigrationsRequested
+    onApplyMigrations = fun kind -> onApplyMigrations(kind, getIntValue())
+  }
+
   do
     base.Classes.Add("MigrationsRunnerToolbar")
 
@@ -111,8 +123,8 @@ type MigrationsRunnerToolbar
       StackPanel()
         .Classes("MigrationsRunnerToolbarPanel")
         .Children(
-          applyPendingButton(dryRun, onRunMigrationsRequested, getIntValue),
-          rollbackButton(dryRun, onRunMigrationsRequested, getIntValue),
+          ApplyPendingButton(upArgs),
+          ApplyPendingButton(downArgs),
           checkBox(dryRun),
           numericUpDown(steps)
         )

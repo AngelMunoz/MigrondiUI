@@ -25,10 +25,13 @@ open MigrondiUI.Database
 open MigrondiUI.Components
 open MigrondiUI.Components.MigrationRunnerToolbar
 open MigrondiUI.Components.Fields
+open SukiUI.Controls
+open SukiUI.Dialogs
 
 type LocalProjectDetailsVM
   (
     logger: ILogger<LocalProjectDetailsVM>,
+    dialogManager: SukiUI.Dialogs.ISukiDialogManager,
     migrondi: IMigrondi,
     project: LocalProject
   ) =
@@ -156,12 +159,38 @@ type LocalProjectDetailsVM
     }
     |> handleException
 
+  member _.ExportToVirtualProject() = failwith "Not Implemented"
+
+  member _.ConfirmRun(args: ProjectDetails.RunMigrationKind) = asyncEx {
+    logger.LogDebug("Confirming run for {args}", args)
+
+    let! token = Async.CancellationToken
+
+    match args with
+    | ProjectDetails.RunMigrationKind.DryUp
+    | ProjectDetails.RunMigrationKind.DryDown -> return true
+    | ProjectDetails.RunMigrationKind.Up
+    | ProjectDetails.RunMigrationKind.Down ->
+      return!
+        dialogManager
+          .CreateDialog()
+          .WithTitle("This is a potentially destructive operation")
+          .WithContent(
+            TextBlock().Classes("h4").Text("Are you sure you want to continue?")
+          )
+          .WithYesNoResult("Yes", "No")
+          .TryShowAsync(token)
+  }
+
+
+
 // Reusing shared component from SharedComponents module
 
 let localProjectView
   (
     project: LocalProject,
-    onRunMigrationsRequested: ProjectDetails.RunMigrationKind * int -> unit
+    onRunMigrationsRequested: ProjectDetails.RunMigrationKind -> Async<bool>,
+    onApplyMigrations: ProjectDetails.RunMigrationKind * int -> Async<unit>
   ) : Control =
   let description = defaultArg project.description "No description"
 
@@ -202,11 +231,13 @@ let localProjectView
           TextBlock()
             .Text($"{project.name} - {description}")
             .VerticalAlignmentCenter(),
-          MigrationsRunnerToolbar(onRunMigrationsRequested)
+          MigrationsRunnerToolbar(onRunMigrationsRequested, onApplyMigrations)
             .VerticalAlignmentCenter()
         )
     )
-    .Content(configView(project.migrondiConfigPath, config))
+    .Content(
+      GlassCard().Content(configView(project.migrondiConfigPath, config))
+    )
 
 let toolbar
   (
@@ -219,9 +250,11 @@ let toolbar
 
   let nameTextBox =
     TextBox()
-      .Name("New Migration Name:")
       .Watermark("Enter migration name")
       .Width(200)
+      .Height(28.)
+      .VerticalAlignmentCenter()
+      .VerticalContentAlignmentCenter()
       .AcceptsReturn(false)
       .OnTextChangedHandler(fun txtBox _ ->
         if String.IsNullOrWhiteSpace txtBox.Text |> not then
@@ -232,27 +265,37 @@ let toolbar
   let createButton =
     Button()
       .Content("Create Migration")
+      .Classes("Accent", "Outlined")
       .IsEnabled(isEnabled |> AVal.toBinding)
       .OnClickHandler(fun _ _ ->
-        let text = (nameTextBox.Text |> nonNull).Trim().Replace(' ', '-')
+        let text = (nonNull nameTextBox.Text).Trim().Replace(' ', '-')
         onNewMigration text
         nameTextBox.Text <- "")
 
   let openInExplorerButton =
     Button()
+
       .Content("Open in Explorer")
       .OnClickHandler(fun _ _ -> onOpenInExplorer())
 
-  Toolbar
-    .get(Spacing 8., Orientation Horizontal)
+  // Grid-based layout replacing Toolbar
+  Grid()
+    .RowDefinitions("Auto")
+    .ColumnDefinitions("Auto,Auto,Auto,Auto,Auto")
+    .ColumnSpacing(8)
     .Children(
-      Button().Content("Back").OnClickHandler(fun _ _ -> onNavigateBack()),
-      Button().Content("Refresh").OnClickHandler(fun _ _ -> onRefresh()),
-      nameTextBox,
-      createButton,
-      openInExplorerButton
+      Button()
+        .Content("Back")
+        .OnClickHandler(fun _ _ -> onNavigateBack())
+        .Column(0),
+      Button()
+        .Content("Refresh")
+        .OnClickHandler(fun _ _ -> onRefresh())
+        .Column(1),
+      openInExplorerButton.Column(2),
+      createButton.Column(3),
+      nameTextBox.Column(4)
     )
-
 
 type LProjectDetailsView(vm: LocalProjectDetailsVM, onNavigateBack) =
   inherit UserControl()
@@ -266,8 +309,9 @@ type LProjectDetailsView(vm: LocalProjectDetailsVM, onNavigateBack) =
   let onOpenInExplorer() =
     vm.OpenFileExplorer() |> Async.StartImmediate
 
-  let onRunMigrationsRequested args =
-    vm.RunMigrations args |> Async.StartImmediate
+  let onMigrationsRunRequested args = vm.ConfirmRun args
+
+  let onApplyMigrations args = vm.RunMigrations args
 
   do
     vm.ListMigrations() |> Async.StartImmediate
@@ -278,26 +322,45 @@ type LProjectDetailsView(vm: LocalProjectDetailsVM, onNavigateBack) =
       Grid()
         .RowDefinitions("Auto,Auto,*")
         .ColumnDefinitions("Auto,*,*")
+        .ColumnSpacing(8)
+        .RowSpacing(8)
         .Children(
-          toolbar(onNavigateBack, onNewMigration, onRefresh, onOpenInExplorer)
+          GlassCard()
+            .Content(
+              toolbar(
+                onNavigateBack,
+                onNewMigration,
+                onRefresh,
+                onOpenInExplorer
+              )
+            )
             .Row(0)
             .Column(0)
-            .ColumnSpan(2)
+            .ColumnSpan(3)
             .HorizontalAlignmentStretch(),
-          localProjectView(vm.Project, onRunMigrationsRequested)
+          GlassCard()
+            .Content(
+              localProjectView(
+                vm.Project,
+                onMigrationsRunRequested,
+                onApplyMigrations
+              )
+            )
             .Row(1)
             .Column(0)
             .ColumnSpan(3)
             .VerticalAlignmentTop()
             .HorizontalAlignmentStretch()
             .MarginY(8),
-          ProjectDetails
-            .MigrationsPanel(
-              currentShow = vm.CurrentShow,
-              migrations = vm.Migrations,
-              lastDryRun = vm.LastDryRun,
-              migrationsView = ProjectDetails.migrationListView,
-              dryRunView = ProjectDetails.dryRunListView
+          GlassCard()
+            .Content(
+              ProjectDetails.MigrationsPanel(
+                currentShow = vm.CurrentShow,
+                migrations = vm.Migrations,
+                lastDryRun = vm.LastDryRun,
+                migrationsView = ProjectDetails.migrationListView,
+                dryRunView = ProjectDetails.dryRunListView
+              )
             )
             .Row(2)
             .Column(0)
@@ -313,6 +376,7 @@ let buildDetailsView
     logger: ILogger<LocalProjectDetailsVM>,
     mLogger: ILogger<IMigrondi>,
     projects: ILocalProjectRepository,
+    dialogManager: ISukiDialogManager,
     onNavigateBack: unit -> unit
   ) =
   asyncOption {
@@ -328,7 +392,7 @@ let buildDetailsView
 
     let migrondi = Migrondi.MigrondiFactory(config, projectRoot, mLogger)
 
-    let vm = LocalProjectDetailsVM(logger, migrondi, project)
+    let vm = LocalProjectDetailsVM(logger, dialogManager, migrondi, project)
     return LProjectDetailsView(vm, onNavigateBack) :> Control
   }
 
@@ -346,7 +410,8 @@ let View
   (
     logger: ILogger<LocalProjectDetailsVM>,
     mLogger: ILogger<IMigrondi>,
-    projects: ILocalProjectRepository
+    projects: ILocalProjectRepository,
+    dialogManager: ISukiDialogManager
   )
   (context: RouteContext)
   (nav: INavigable<Control>)
@@ -375,7 +440,14 @@ let View
 
     asyncEx {
       match!
-        buildDetailsView(projectId, logger, mLogger, projects, onNavigateBack)
+        buildDetailsView(
+          projectId,
+          logger,
+          mLogger,
+          projects,
+          dialogManager,
+          onNavigateBack
+        )
       with
       | Some builtView -> view.setValue(builtView)
       | None -> view.setValue(buildProjectNotFound projectId)

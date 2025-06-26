@@ -57,10 +57,16 @@ let private newProjectView appEnvironment =
   )
 
 let private projectDetailsView appEnvironment =
-  let { lf = lf; lProjects = projects } = appEnvironment
+  let {
+        lf = lf
+        lProjects = projects
+        dialogManager = dialogManager
+      } =
+    appEnvironment
+
   let logger = lf.CreateLogger<LocalProjectDetails.LocalProjectDetailsVM>()
   let mLogger = lf.CreateLogger<Migrondi.Core.IMigrondi>()
-  LocalProjectDetails.View(logger, mLogger, projects)
+  LocalProjectDetails.View(logger, mLogger, projects, dialogManager)
 
 let private vProjectDetailsView appEnvironment =
   let {
