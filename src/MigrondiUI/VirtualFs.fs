@@ -1,10 +1,7 @@
 module MigrondiUI.VirtualFs
 
 open System
-open System.Collections.Generic
 open System.IO
-open System.Text
-open System.Text.RegularExpressions
 open System.Threading
 open System.Threading.Tasks
 open System.Runtime.InteropServices
@@ -12,176 +9,12 @@ open IcedTasks
 
 open Migrondi.Core
 open Migrondi.Core.FileSystem
+open Migrondi.Core.Serialization
 
-open JDeck
-open MigrondiUI.Projects
-open Microsoft.Extensions.Logging
 open FsToolkit.ErrorHandling
 
-[<Literal>]
-let MigrationNameSchema: string = "^(?<Timestamp>[0-9]+)_(?<Name>.+).(sql|SQL)$"
-
-[<return: Struct>]
-let (|HasGroup|_|) (name: string) (groups: Match) =
-  if not groups.Success then
-    ValueNone
-  else
-    match groups.Groups[name] with
-    | group when group.Length = 0 -> ValueNone
-    | group -> ValueSome group.Value
-
-let mnRegex = lazy Regex(MigrationNameSchema)
-
-let extractTimestampAndName(name: string) =
-  let groups = mnRegex.Value.Match(name)
-
-  match groups with
-  | HasGroup "Timestamp" timestamp & HasGroup "Name" name ->
-    let timestamp = Int64.Parse timestamp
-    let name = name.Trim()
-
-    if String.IsNullOrWhiteSpace name then
-      failwith $"Invalid migration name %s{name}"
-
-    struct (timestamp, name)
-  | _ -> failwith $"Invalid migration name %s{name}"
-
-let internal migrationDelimiter(key: string, value: string option) =
-  let start =
-    match value with
-    | Some _ -> "-- "
-    | None -> "-- ---------- "
-
-  let value =
-    match value with
-    | Some value -> $"={value}"
-    | None -> " ----------"
-
-  $"{start}MIGRONDI:%s{key}{value}"
-
-let internal encodeMigrationText(migration: Migration) : string =
-  let sb = StringBuilder()
-  let name = migrationDelimiter("NAME", Some migration.name)
-
-  let timestamp =
-    migrationDelimiter("TIMESTAMP", Some(migration.timestamp.ToString()))
-
-  let manualTransaction =
-    if migration.manualTransaction then
-      migrationDelimiter(
-        "ManualTransaction",
-        Some(migration.manualTransaction.ToString())
-      )
-      + "\n"
-    else
-      ""
-
-  let up = migrationDelimiter("UP", None)
-  let down = migrationDelimiter("DOWN", None)
-
-  sb
-    .Append(name)
-    .Append('\n')
-    .Append(timestamp)
-    .Append('\n')
-    .Append(manualTransaction)
-    .Append(up)
-    .Append('\n')
-    .Append(migration.upContent)
-    .Append('\n')
-    .Append(down)
-    .Append('\n')
-    .Append(migration.downContent)
-    .Append('\n')
-    .ToString()
-
-let internal decodeMigrationText(content: string) : Result<Migration, string> = result {
-  let upDownMatcher =
-    Regex(
-      "-- ---------- MIGRONDI:(?<Identifier>UP|DOWN) ----------",
-      RegexOptions.Multiline
-    )
-
-  let metadataMatcher =
-    Regex(
-      "-- MIGRONDI:(?<Key>[a-zA-Z0-9_-]+)=(?<Value>[a-zA-Z0-9_-]+)",
-      RegexOptions.Multiline
-    )
-
-  let upDownCollection = upDownMatcher.Matches(content)
-  let metadataCollection = metadataMatcher.Matches(content)
-
-  let! name =
-    metadataCollection
-    |> Seq.tryFind(fun value ->
-      System.String.Equals(
-        value.Groups["Key"].Value,
-        "NAME",
-        StringComparison.OrdinalIgnoreCase
-      ))
-    |> Option.map(fun v -> v.Groups["Value"].Value)
-    |> Result.requireSome "Missing Migration Name In metadata"
-
-  let! timestamp =
-    metadataCollection
-    |> Seq.tryFind(fun value ->
-      System.String.Equals(
-        value.Groups["Key"].Value,
-        "TIMESTAMP",
-        StringComparison.OrdinalIgnoreCase
-      ))
-    |> Option.map(fun v -> v.Groups["Value"].Value)
-    |> Result.requireSome "Missing Migration Timestamp In metadata"
-    |> Result.bind(fun value ->
-      try
-        int64 value |> Ok
-      with ex ->
-        Error $"Invalid timestamp: {ex.Message}")
-
-  let manualTransaction =
-    metadataCollection
-    |> Seq.tryFind(fun value ->
-      System.String.Equals(
-        value.Groups["Key"].Value,
-        "ManualTransaction",
-        StringComparison.OrdinalIgnoreCase
-      ))
-    |> Option.map(fun v ->
-      let value = v.Groups["Value"].Value
-
-      match value.ToLowerInvariant() with
-      | "true" -> true
-      | _ -> false)
-    |> Option.defaultValue false
-
-  do!
-    upDownCollection.Count = 2
-    |> Result.requireTrue "Invalid Migrations Format"
-    |> Result.ignore
-
-  let upIndex =
-    upDownCollection
-    |> Seq.find(fun value -> value.Groups["Identifier"].Value = "UP")
-    |> _.Index
-
-  let downIndex =
-    upDownCollection
-    |> Seq.find(fun value -> value.Groups["Identifier"].Value = "DOWN")
-    |> _.Index
-
-  let slicedUp = content[upIndex .. downIndex - 1]
-  let fromUp = slicedUp.IndexOf('\n') + 1
-  let slicedDown = content[downIndex..]
-  let fromDown = content.Substring(downIndex).IndexOf('\n') + 1
-
-  return {
-    name = name
-    upContent = slicedUp[fromUp..].Trim()
-    downContent = slicedDown[fromDown..].Trim()
-    timestamp = timestamp
-    manualTransaction = manualTransaction
-  }
-}
+open MigrondiUI.Projects
+open Microsoft.Extensions.Logging
 
 type MigrondiUIFs =
   inherit IMiMigrationSource
@@ -210,11 +43,7 @@ let getVirtualFs
       let! token = CancellableTask.getCancellationToken()
       let! content = File.ReadAllTextAsync(configPath, token)
 
-      return
-        Decoding.fromString(content, MigrondiUI.Json.migrondiConfigDecoder)
-        |> function
-          | Ok c -> c
-          | Error e -> failwith $"Failed to decode config: %A{e}"
+      return MiSerializer.DecodeConfig content
     }
 
     logger.LogInformation("Found config {config}", config)
@@ -229,12 +58,7 @@ let getVirtualFs
         let! content = File.ReadAllTextAsync(f.FullName, token)
         logger.LogDebug("Found migration {migrationPath}", f.FullName)
 
-        return
-          decodeMigrationText content
-          |> function
-            | Ok m -> m
-            | Error e ->
-              failwith $"Failed to decode migration %s{f.Name}: %s{e}"
+        return MiSerializer.Decode(content, f.Name)
       })
       |> Async.Parallel
 
@@ -297,8 +121,6 @@ let getVirtualFs
 
         logger.LogDebug("Reading content for {uri}", uri)
 
-        // migrondi-ui://projects/{projectId}/config
-        // migrondi-ui://projects/{projectId}/migrations/{migrationName}
         match uri.Scheme, uri.Host, uri.Segments with
         | "migrondi-ui", "projects", [| "/"; projectIdStr; "config" |] ->
           let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
@@ -308,12 +130,7 @@ let getVirtualFs
           | None -> return failwith $"Project {projectId} not found"
           | Some p ->
             let config = p.ToMigrondiConfig()
-            let node = MigrondiUI.Json.migrondiConfigEncoder config
-
-            let options =
-              System.Text.Json.JsonSerializerOptions(WriteIndented = true)
-
-            return node.ToJsonString(options)
+            return MiSerializer.Encode config
 
         | "migrondi-ui",
           "projects",
@@ -322,7 +139,7 @@ let getVirtualFs
 
           match migration with
           | None -> return failwith $"Migration {migrationName} not found"
-          | Some m -> return encodeMigrationText(m.ToMigration())
+          | Some m -> return MiSerializer.Encode(m.ToMigration())
 
         | _ -> return failwith $"Unsupported URI: {uri}"
       }
@@ -347,14 +164,7 @@ let getVirtualFs
             match project with
             | None -> return failwith $"Project {projectId} not found"
             | Some p ->
-              let config =
-                Decoding.fromString(
-                  content,
-                  MigrondiUI.Json.migrondiConfigDecoder
-                )
-                |> function
-                  | Ok c -> c
-                  | Error e -> failwith $"Failed to decode config: %A{e}"
+              let config = MiSerializer.DecodeConfig content
 
               let updatedProject = {
                 p with
@@ -370,11 +180,7 @@ let getVirtualFs
             [| "/"; projectIdStr; "migrations/"; migrationName |] ->
             let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
 
-            let migration =
-              decodeMigrationText content
-              |> function
-                | Ok m -> m
-                | Error e -> failwith $"Failed to decode migration: %s{e}"
+            let migration = MiSerializer.Decode(content, migrationName)
 
             let virtualMigration: VirtualMigration = {
               id = Guid.NewGuid()
@@ -437,7 +243,7 @@ let getVirtualFs
 
         match found with
         | None -> return failwith $"Project with id {project} not found"
-        | Some(project, migrations) ->
+        | Some(project: VirtualProject, migrations: VirtualMigration list) ->
           let config = {
             project.ToMigrondiConfig() with
                 migrations = "./migrations"
@@ -448,21 +254,15 @@ let getVirtualFs
 
           let configPath = Path.Combine(projectRoot.FullName, "migrondi.json")
 
-          let configContent: string =
-            let node = MigrondiUI.Json.migrondiConfigEncoder config
-
-            let options =
-              System.Text.Json.JsonSerializerOptions(WriteIndented = true)
-
-            node.ToJsonString(options)
+          let configContent = MiSerializer.Encode config
 
           do! File.WriteAllTextAsync(configPath, configContent, token)
 
           do!
             migrations
-            |> List.map(fun vm -> asyncEx {
+            |> List.map(fun (vm: VirtualMigration) -> asyncEx {
               let! token = Async.CancellationToken
-              let content = encodeMigrationText(vm.ToMigration())
+              let content: string = MiSerializer.Encode(vm.ToMigration())
 
               let migrationPath =
                 Path.Combine(
