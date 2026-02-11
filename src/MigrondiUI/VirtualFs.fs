@@ -3,14 +3,17 @@ module MigrondiUI.VirtualFs
 open System
 open System.Collections.Generic
 open System.IO
+open System.Text
 open System.Text.RegularExpressions
 open System.Threading
+open System.Threading.Tasks
+open System.Runtime.InteropServices
 open IcedTasks
 
 open Migrondi.Core
 open Migrondi.Core.FileSystem
-open Migrondi.Core.Serialization
 
+open JDeck
 open MigrondiUI.Projects
 open Microsoft.Extensions.Logging
 open FsToolkit.ErrorHandling
@@ -43,8 +46,145 @@ let extractTimestampAndName(name: string) =
     struct (timestamp, name)
   | _ -> failwith $"Invalid migration name %s{name}"
 
+let internal migrationDelimiter(key: string, value: string option) =
+  let start =
+    match value with
+    | Some _ -> "-- "
+    | None -> "-- ---------- "
+
+  let value =
+    match value with
+    | Some value -> $"={value}"
+    | None -> " ----------"
+
+  $"{start}MIGRONDI:%s{key}{value}"
+
+let internal encodeMigrationText(migration: Migration) : string =
+  let sb = StringBuilder()
+  let name = migrationDelimiter("NAME", Some migration.name)
+
+  let timestamp =
+    migrationDelimiter("TIMESTAMP", Some(migration.timestamp.ToString()))
+
+  let manualTransaction =
+    if migration.manualTransaction then
+      migrationDelimiter(
+        "ManualTransaction",
+        Some(migration.manualTransaction.ToString())
+      )
+      + "\n"
+    else
+      ""
+
+  let up = migrationDelimiter("UP", None)
+  let down = migrationDelimiter("DOWN", None)
+
+  sb
+    .Append(name)
+    .Append('\n')
+    .Append(timestamp)
+    .Append('\n')
+    .Append(manualTransaction)
+    .Append(up)
+    .Append('\n')
+    .Append(migration.upContent)
+    .Append('\n')
+    .Append(down)
+    .Append('\n')
+    .Append(migration.downContent)
+    .Append('\n')
+    .ToString()
+
+let internal decodeMigrationText(content: string) : Result<Migration, string> = result {
+  let upDownMatcher =
+    Regex(
+      "-- ---------- MIGRONDI:(?<Identifier>UP|DOWN) ----------",
+      RegexOptions.Multiline
+    )
+
+  let metadataMatcher =
+    Regex(
+      "-- MIGRONDI:(?<Key>[a-zA-Z0-9_-]+)=(?<Value>[a-zA-Z0-9_-]+)",
+      RegexOptions.Multiline
+    )
+
+  let upDownCollection = upDownMatcher.Matches(content)
+  let metadataCollection = metadataMatcher.Matches(content)
+
+  let! name =
+    metadataCollection
+    |> Seq.tryFind(fun value ->
+      System.String.Equals(
+        value.Groups["Key"].Value,
+        "NAME",
+        StringComparison.OrdinalIgnoreCase
+      ))
+    |> Option.map(fun v -> v.Groups["Value"].Value)
+    |> Result.requireSome "Missing Migration Name In metadata"
+
+  let! timestamp =
+    metadataCollection
+    |> Seq.tryFind(fun value ->
+      System.String.Equals(
+        value.Groups["Key"].Value,
+        "TIMESTAMP",
+        StringComparison.OrdinalIgnoreCase
+      ))
+    |> Option.map(fun v -> v.Groups["Value"].Value)
+    |> Result.requireSome "Missing Migration Timestamp In metadata"
+    |> Result.bind(fun value ->
+      try
+        int64 value |> Ok
+      with ex ->
+        Error $"Invalid timestamp: {ex.Message}")
+
+  let manualTransaction =
+    metadataCollection
+    |> Seq.tryFind(fun value ->
+      System.String.Equals(
+        value.Groups["Key"].Value,
+        "ManualTransaction",
+        StringComparison.OrdinalIgnoreCase
+      ))
+    |> Option.map(fun v ->
+      let value = v.Groups["Value"].Value
+
+      match value.ToLowerInvariant() with
+      | "true" -> true
+      | _ -> false)
+    |> Option.defaultValue false
+
+  do!
+    upDownCollection.Count = 2
+    |> Result.requireTrue "Invalid Migrations Format"
+    |> Result.ignore
+
+  let upIndex =
+    upDownCollection
+    |> Seq.find(fun value -> value.Groups["Identifier"].Value = "UP")
+    |> _.Index
+
+  let downIndex =
+    upDownCollection
+    |> Seq.find(fun value -> value.Groups["Identifier"].Value = "DOWN")
+    |> _.Index
+
+  let slicedUp = content[upIndex .. downIndex - 1]
+  let fromUp = slicedUp.IndexOf('\n') + 1
+  let slicedDown = content[downIndex..]
+  let fromDown = content.Substring(downIndex).IndexOf('\n') + 1
+
+  return {
+    name = name
+    upContent = slicedUp[fromUp..].Trim()
+    downContent = slicedDown[fromDown..].Trim()
+    timestamp = timestamp
+    manualTransaction = manualTransaction
+  }
+}
+
 type MigrondiUIFs =
-  inherit IMiFileSystem
+  inherit IMiMigrationSource
 
   abstract member ExportToLocal:
     project: Guid * projectPath: string -> CancellableTask<string>
@@ -58,25 +198,23 @@ let getVirtualFs
   (logger: ILogger<MigrondiUIFs>, vpr: IVirtualProjectRepository)
   =
   let importProjectFromPath (configPath: string) (projectName: string) = cancellableTask {
-    let configSerializer, migrationSerializer =
-      let serializer = MigrondiSerializer()
-
-      serializer :> IMiConfigurationSerializer,
-      serializer :> IMiMigrationSerializer
-
     let rootDir = Path.GetDirectoryName(configPath)
 
     logger.LogInformation(
       "Importing project {projectName} from {rootDir}",
       projectName,
       rootDir
-
     )
 
     let! config = cancellableTask {
       let! token = CancellableTask.getCancellationToken()
       let! content = File.ReadAllTextAsync(configPath, token)
-      return configSerializer.Decode content
+
+      return
+        Decoding.fromString(content, MigrondiUI.Json.migrondiConfigDecoder)
+        |> function
+          | Ok c -> c
+          | Error e -> failwith $"Failed to decode config: %A{e}"
     }
 
     logger.LogInformation("Found config {config}", config)
@@ -90,7 +228,13 @@ let getVirtualFs
         let! token = Async.CancellationToken
         let! content = File.ReadAllTextAsync(f.FullName, token)
         logger.LogDebug("Found migration {migrationPath}", f.FullName)
-        return migrationSerializer.DecodeText content
+
+        return
+          decodeMigrationText content
+          |> function
+            | Ok m -> m
+            | Error e ->
+              failwith $"Failed to decode migration %s{f.Name}: %s{e}"
       })
       |> Async.Parallel
 
@@ -131,7 +275,6 @@ let getVirtualFs
         )
 
         return! vpr.InsertMigration vMigration token
-
       })
       |> Async.Parallel
 
@@ -145,149 +288,137 @@ let getVirtualFs
   }
 
   { new MigrondiUIFs with
+      member this.ReadContent(uri: Uri) =
+        failwith
+          "Synchronous read is not supported. Use ReadContentAsync instead."
 
-      member _.ListMigrations migrationsLocation = failwith "Not Implemented"
-      member _.ReadConfiguration readFrom = failwith "Not Implemented"
-      member _.ReadMigration migrationName = failwith "Not Implemented"
-
-      member _.WriteConfiguration(config, writeTo) = failwith "Not Implemented"
-
-      member _.WriteMigration(migration, migrationName) =
-        failwith "Not Implemented"
-
-      member _.ListMigrationsAsync(migrationsLocation, ?cancellationToken) = task {
+      member this.ReadContentAsync(uri, [<Optional>] ?cancellationToken) = task {
         let ct = defaultArg cancellationToken CancellationToken.None
 
-        logger.LogDebug(
-          "Listing migrations for {migrationsLocation}",
-          migrationsLocation
-        )
+        logger.LogDebug("Reading content for {uri}", uri)
 
-        let guid = Guid.Parse migrationsLocation
-        let! migrations = vpr.GetMigrations guid ct
+        // migrondi-ui://projects/{projectId}/config
+        // migrondi-ui://projects/{projectId}/migrations/{migrationName}
+        match uri.Scheme, uri.Host, uri.Segments with
+        | "migrondi-ui", "projects", [| "/"; projectIdStr; "config" |] ->
+          let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
+          let! project = vpr.GetProjectById projectId ct
 
-        let migrations: Migration list =
-          migrations
-          |> List.map(fun m -> {
-            name = m.name
-            timestamp = m.timestamp
-            upContent = m.upContent
-            downContent = m.downContent
-            manualTransaction = m.manualTransaction
-          })
+          match project with
+          | None -> return failwith $"Project {projectId} not found"
+          | Some p ->
+            let config = p.ToMigrondiConfig()
+            let node = MigrondiUI.Json.migrondiConfigEncoder config
 
-        logger.LogDebug(
-          "Found {count} migrations for {migrationsLocation}",
-          migrations.Length,
-          migrationsLocation
-        )
+            let options =
+              System.Text.Json.JsonSerializerOptions(WriteIndented = true)
 
-        return migrations :> IReadOnlyList<Migration>
+            return node.ToJsonString(options)
+
+        | "migrondi-ui",
+          "projects",
+          [| "/"; projectIdStr; "migrations/"; migrationName |] ->
+          let! migration = vpr.GetMigrationByName migrationName ct
+
+          match migration with
+          | None -> return failwith $"Migration {migrationName} not found"
+          | Some m -> return encodeMigrationText(m.ToMigration())
+
+        | _ -> return failwith $"Unsupported URI: {uri}"
       }
 
-      member _.ReadConfigurationAsync(readFrom, ?cancellationToken) = task {
-        let ct = defaultArg cancellationToken CancellationToken.None
-        logger.LogDebug("Reading configuration for {readFrom}", readFrom)
-        let guid = Guid.Parse readFrom
-        let! config = vpr.GetProjectById guid ct
+      member this.WriteContent(uri, content) =
+        failwith
+          "Synchronous write is not supported. Use WriteContentAsync instead."
 
-        match config with
-        | None -> return failwith $"Project with id %s{readFrom} not found"
-        | Some config ->
-          return {
-            connection = config.connection
-            migrations = config.id.ToString()
-            tableName = config.tableName
-            driver = config.driver
-          }
-      }
-
-      member _.ReadMigrationAsync(migrationName, ?cancellationToken) = task {
-        let ct = defaultArg cancellationToken CancellationToken.None
-
-        logger.LogDebug("Reading migration for {migrationName}", migrationName)
-
-        let! migration = vpr.GetMigrationByName migrationName ct
-
-        match migration with
-        | None ->
-          return failwith $"Migration with name %s{migrationName} not found"
-        | Some migration ->
-          logger.LogDebug(
-            "Found migration with name {migrationName}",
-            migrationName
-          )
-
-          return {
-            name = migration.name
-            timestamp = migration.timestamp
-            upContent = migration.upContent
-            downContent = migration.downContent
-            manualTransaction = migration.manualTransaction
-          }
-      }
-
-      member _.WriteConfigurationAsync(config, writeTo, ?cancellationToken) = task {
-        let ct = defaultArg cancellationToken CancellationToken.None
-        logger.LogDebug("Writing configuration for {writeTo}", writeTo)
-        let guid = Guid.Parse writeTo
-        let! project = vpr.GetProjectById guid ct
-
-        match project with
-        | None -> return failwith $"Project with id %s{writeTo} not found"
-        | Some project ->
-          let updatedProject = {
-            project with
-                connection = config.connection
-                tableName = config.tableName
-                driver = config.driver
-          }
-
-          logger.LogDebug("Found project with id {writeTo}", writeTo)
-          return! vpr.UpdateProject updatedProject ct
-      }
-
-      member _.WriteMigrationAsync
-        (migration, migrationName, ?cancellationToken)
+      member this.WriteContentAsync
+        (uri, content, [<Optional>] ?cancellationToken)
         =
         task {
           let ct = defaultArg cancellationToken CancellationToken.None
 
-          let migrationName, projectId =
-            match migrationName.Split '~' with
-            | [| name; projectId |] ->
-              $"{name}.sql", Guid.Parse(projectId.Remove 36)
-            | _ -> failwith "Invalid migration name format"
+          logger.LogDebug("Writing content to {uri}", uri)
 
+          match uri.Scheme, uri.Host, uri.Segments with
+          | "migrondi-ui", "projects", [| "/"; projectIdStr; "config" |] ->
+            let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
+            let! project = vpr.GetProjectById projectId ct
 
-          logger.LogDebug(
-            "Writing migration for {migrationName}",
-            migrationName
-          )
+            match project with
+            | None -> return failwith $"Project {projectId} not found"
+            | Some p ->
+              let config =
+                Decoding.fromString(
+                  content,
+                  MigrondiUI.Json.migrondiConfigDecoder
+                )
+                |> function
+                  | Ok c -> c
+                  | Error e -> failwith $"Failed to decode config: %A{e}"
 
-          let struct (timestamp, name) = extractTimestampAndName migrationName
+              let updatedProject = {
+                p with
+                    connection = config.connection
+                    tableName = config.tableName
+                    driver = config.driver
+              }
 
-          logger.LogDebug(
-            "Extracted timestamp {timestamp} and name {name} from {migrationName}",
-            timestamp,
-            name,
-            migrationName
-          )
+              return! vpr.UpdateProject updatedProject ct
 
-          logger.LogDebug("Looking for project with id {guid}", projectId)
+          | "migrondi-ui",
+            "projects",
+            [| "/"; projectIdStr; "migrations/"; migrationName |] ->
+            let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
 
-          let virtualMigration: VirtualMigration = {
-            id = Guid.NewGuid()
-            name = name
-            timestamp = timestamp
-            upContent = migration.upContent
-            downContent = migration.downContent
-            projectId = projectId
-            manualTransaction = migration.manualTransaction
-          }
+            let migration =
+              decodeMigrationText content
+              |> function
+                | Ok m -> m
+                | Error e -> failwith $"Failed to decode migration: %s{e}"
 
-          return! vpr.InsertMigration virtualMigration ct
+            let virtualMigration: VirtualMigration = {
+              id = Guid.NewGuid()
+              name = migration.name
+              timestamp = migration.timestamp
+              upContent = migration.upContent
+              downContent = migration.downContent
+              projectId = projectId
+              manualTransaction = migration.manualTransaction
+            }
+
+            let! existing = vpr.GetMigrationByName migrationName ct
+
+            match existing with
+            | Some _ -> return! vpr.UpdateMigration virtualMigration ct
+            | None ->
+              let! _ = vpr.InsertMigration virtualMigration ct
+              return ()
+
+          | _ -> return failwith $"Unsupported URI: {uri}"
         }
+
+      member this.ListFiles(locationUri) =
+        failwith
+          "Synchronous listing is not supported. Use ListFilesAsync instead."
+
+      member this.ListFilesAsync(locationUri, [<Optional>] ?cancellationToken) = task {
+        let ct = defaultArg cancellationToken CancellationToken.None
+
+        logger.LogDebug("Listing files in {uri}", locationUri)
+
+        match locationUri.Scheme, locationUri.Host, locationUri.Segments with
+        | "migrondi-ui", "projects", [| "/"; projectIdStr; "migrations/" |] ->
+          let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
+          let! migrations = vpr.GetMigrations projectId ct
+
+          return
+            migrations
+            |> List.map(fun m ->
+              Uri(locationUri, $"{m.timestamp}_{m.name}.sql"))
+            :> Uri seq
+
+        | _ -> return failwith $"Unsupported URI: {locationUri}"
+      }
 
       member _.ExportToLocal(project, path) = cancellableTask {
         let! token = CancellableTask.getCancellationToken()
@@ -305,57 +436,33 @@ let getVirtualFs
         }
 
         match found with
-        | None ->
-          logger.LogWarning("Project with id {project} not found", project)
-          return failwith $"Project with id {project} not found"
+        | None -> return failwith $"Project with id {project} not found"
         | Some(project, migrations) ->
-          logger.LogInformation(
-            "Found project {project} with {migrations} migrations",
-            project,
-            migrations.Length
-          )
-
           let config = {
             project.ToMigrondiConfig() with
                 migrations = "./migrations"
           }
 
-          let configSerializer, migrationSerializer =
-            let serializer = MigrondiSerializer()
-
-            serializer :> IMiConfigurationSerializer,
-            serializer :> IMiMigrationSerializer
-
           let projectRoot = Directory.CreateDirectory(path)
           let migrationsDir = projectRoot.CreateSubdirectory("migrations")
-          projectRoot.Create()
-          migrationsDir.Create()
-
-          logger.LogDebug(
-            "Created project root {projectRoot} and migrations dir {migrationsDir}",
-            projectRoot.FullName,
-            migrationsDir.FullName
-          )
 
           let configPath = Path.Combine(projectRoot.FullName, "migrondi.json")
-          let configContent = configSerializer.Encode config
 
-          logger.LogInformation("Writing config to {configPath}", configPath)
+          let configContent: string =
+            let node = MigrondiUI.Json.migrondiConfigEncoder config
+
+            let options =
+              System.Text.Json.JsonSerializerOptions(WriteIndented = true)
+
+            node.ToJsonString(options)
 
           do! File.WriteAllTextAsync(configPath, configContent, token)
-
-          logger.LogInformation(
-            "Writing migrations to {migrationsDir}",
-            migrationsDir.FullName
-          )
 
           do!
             migrations
             |> List.map(fun vm -> asyncEx {
               let! token = Async.CancellationToken
-
-              let migration = vm.ToMigration()
-              let content = migrationSerializer.EncodeText migration
+              let content = encodeMigrationText(vm.ToMigration())
 
               let migrationPath =
                 Path.Combine(
@@ -363,21 +470,10 @@ let getVirtualFs
                   $"{vm.timestamp}_{vm.name}.sql"
                 )
 
-              logger.LogDebug(
-                "Writing migration {migrationPath}",
-                migrationPath
-              )
-
               do! File.WriteAllTextAsync(migrationPath, content, token)
-              return ()
             })
             |> Async.Parallel
             |> Async.Ignore
-
-          logger.LogInformation(
-            "Project exported to {projectRoot}",
-            projectRoot.FullName
-          )
 
           return projectRoot.FullName
       }
@@ -386,8 +482,6 @@ let getVirtualFs
         importProjectFromPath project.migrondiConfigPath project.name
 
       member _.ImportFromLocal(projectConfigPath: string) =
-
         let projectName = Path.GetDirectoryName projectConfigPath |> nonNull
-
         importProjectFromPath projectConfigPath projectName
   }

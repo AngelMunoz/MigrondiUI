@@ -2,8 +2,10 @@ module MigrondiUI.MigrondiExt
 
 open System
 open System.Collections.Generic
+open System.IO
 open System.Threading
 open System.Threading.Tasks
+open System.Runtime.InteropServices
 
 
 open Migrondi.Core
@@ -27,7 +29,12 @@ let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
   fun (config: MigrondiConfig, rootDir: string, projectId: Guid) ->
 
     let migrondi =
-      Migrondi.Core.Migrondi.MigrondiFactory(config, rootDir, ml, vfs)
+      Migrondi.Core.Migrondi.MigrondiFactory(
+        config,
+        rootDir,
+        ml,
+        vfs
+      )
 
 
     { new IMigrondiUI with
@@ -72,23 +79,29 @@ let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
 
 
         member _.RunNew
-          (friendlyName: string, ?upContent, ?downContent)
+          (friendlyName: string, ?upContent, ?downContent, ?manualTransaction)
           : Migration =
 
           migrondi.RunNew(
             friendlyName,
             ?upContent = upContent,
-            ?downContent = downContent
+            ?downContent = downContent,
+            ?manualTransaction = manualTransaction
           )
 
         member _.RunNewAsync
-          (friendlyName: string, ?upContent, ?downContent, ?cancellationToken)
+          (friendlyName: string,
+           ?upContent,
+           ?downContent,
+           ?manualTransaction,
+           ?cancellationToken)
           : Task<Migration> =
 
           migrondi.RunNewAsync(
-            $"{friendlyName}~{projectId}",
+            friendlyName,
             ?upContent = upContent,
             ?downContent = downContent,
+            ?manualTransaction = manualTransaction,
             ?cancellationToken = cancellationToken
           )
 
