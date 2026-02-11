@@ -27,6 +27,41 @@ type MigrondiUIFs =
 
   abstract member ImportFromLocal: projectPath: string -> CancellableTask<Guid>
 
+type VirtualProjectResource =
+  | ProjectConfig of projectId: Guid
+  | Migration of projectId: Guid * migrationName: string
+  | MigrationList of projectId: Guid
+
+let private parseVirtualProjectUri(uri: Uri) : VirtualProjectResource option =
+  if uri.Scheme <> "migrondi-ui" then
+    None
+  else
+    let segments = uri.Segments |> Array.map(fun s -> s.TrimEnd('/'))
+    printfn "Parsing URI segments: %A" segments
+
+    match segments with
+    | [| ""; "virtual"; projectId; "config" |] ->
+      match Guid.TryParse projectId with
+      | true, id -> Some(ProjectConfig id)
+      | _ -> None
+
+    | [| ""; "virtual"; projectId |] ->
+      match Guid.TryParse projectId with
+      | true, id -> Some(MigrationList id)
+      | _ -> None
+
+    | [| ""; "virtual"; projectId; "migrations" |] ->
+      match Guid.TryParse projectId with
+      | true, id -> Some(MigrationList id)
+      | _ -> None
+
+    | [| ""; "virtual"; projectId; "migrations"; migrationName |] ->
+      match Guid.TryParse projectId with
+      | true, id -> Some(Migration(id, migrationName))
+      | _ -> None
+
+    | _ -> None
+
 let getVirtualFs
   (logger: ILogger<MigrondiUIFs>, vpr: IVirtualProjectRepository)
   =
@@ -121,9 +156,8 @@ let getVirtualFs
 
         logger.LogDebug("Reading content for {uri}", uri)
 
-        match uri.Scheme, uri.Host, uri.Segments with
-        | "migrondi-ui", "projects", [| "/"; projectIdStr; "config" |] ->
-          let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
+        match parseVirtualProjectUri uri with
+        | Some(ProjectConfig projectId) ->
           let! project = vpr.GetProjectById projectId ct
 
           match project with
@@ -132,16 +166,17 @@ let getVirtualFs
             let config = p.ToMigrondiConfig()
             return MiSerializer.Encode config
 
-        | "migrondi-ui",
-          "projects",
-          [| "/"; projectIdStr; "migrations/"; migrationName |] ->
+        | Some(Migration(_, migrationName)) ->
           let! migration = vpr.GetMigrationByName migrationName ct
 
           match migration with
           | None -> return failwith $"Migration {migrationName} not found"
           | Some m -> return MiSerializer.Encode(m.ToMigration())
 
-        | _ -> return failwith $"Unsupported URI: {uri}"
+        | Some(MigrationList _) ->
+          return failwith "Cannot read content from migration list URI"
+
+        | None -> return failwith $"Unsupported URI: {uri}"
       }
 
       member this.WriteContent(uri, content) =
@@ -156,9 +191,8 @@ let getVirtualFs
 
           logger.LogDebug("Writing content to {uri}", uri)
 
-          match uri.Scheme, uri.Host, uri.Segments with
-          | "migrondi-ui", "projects", [| "/"; projectIdStr; "config" |] ->
-            let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
+          match parseVirtualProjectUri uri with
+          | Some(ProjectConfig projectId) ->
             let! project = vpr.GetProjectById projectId ct
 
             match project with
@@ -175,11 +209,7 @@ let getVirtualFs
 
               return! vpr.UpdateProject updatedProject ct
 
-          | "migrondi-ui",
-            "projects",
-            [| "/"; projectIdStr; "migrations/"; migrationName |] ->
-            let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
-
+          | Some(Migration(projectId, migrationName)) ->
             let migration = MiSerializer.Decode(content, migrationName)
 
             let virtualMigration: VirtualMigration = {
@@ -200,7 +230,10 @@ let getVirtualFs
               let! _ = vpr.InsertMigration virtualMigration ct
               return ()
 
-          | _ -> return failwith $"Unsupported URI: {uri}"
+          | Some(MigrationList _) ->
+            return failwith "Cannot write content to migration list URI"
+
+          | None -> return failwith $"Unsupported URI: {uri}"
         }
 
       member this.ListFiles(locationUri) =
@@ -212,9 +245,8 @@ let getVirtualFs
 
         logger.LogDebug("Listing files in {uri}", locationUri)
 
-        match locationUri.Scheme, locationUri.Host, locationUri.Segments with
-        | "migrondi-ui", "projects", [| "/"; projectIdStr; "migrations/" |] ->
-          let projectId = Guid.Parse(projectIdStr.TrimEnd('/'))
+        match parseVirtualProjectUri locationUri with
+        | Some(MigrationList projectId) ->
           let! migrations = vpr.GetMigrations projectId ct
 
           return
@@ -223,7 +255,13 @@ let getVirtualFs
               Uri(locationUri, $"{m.timestamp}_{m.name}.sql"))
             :> Uri seq
 
-        | _ -> return failwith $"Unsupported URI: {locationUri}"
+        | Some(ProjectConfig _) ->
+          return failwith "Cannot list files from config URI"
+
+        | Some(Migration _) ->
+          return failwith "Cannot list files from single migration URI"
+
+        | None -> return failwith $"Unsupported URI: {locationUri}"
       }
 
       member _.ExportToLocal(project, path) = cancellableTask {

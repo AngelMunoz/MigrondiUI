@@ -6,7 +6,7 @@ open System.IO
 open System.Threading
 open System.Threading.Tasks
 open System.Runtime.InteropServices
-
+open System.Text.RegularExpressions
 
 open Migrondi.Core
 open Microsoft.Extensions.Logging
@@ -21,6 +21,28 @@ type IMigrondiUI =
     migration: VirtualMigration * ?cancellationToken: CancellationToken -> Task
 
 
+let private normalizeSqliteConnection (vProjectId: Guid) (connection: string) =
+  let pattern = Regex(@"Data Source\s*=\s*(.+?)(?:;|$)", RegexOptions.IgnoreCase)
+  let m = pattern.Match(connection)
+  
+  if not m.Success then connection
+  else
+    let dataSource = m.Groups.[1].Value.Trim()
+    
+    if Path.IsPathRooted dataSource then connection
+    else
+      let appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+      let baseDir = Path.Combine(appData, "MigrondiUI", vProjectId.ToString())
+      let fileName = dataSource.Replace("./", "").Replace(".\\", "")
+      let absolutePath = Path.Combine(baseDir, fileName)
+      
+      if not (Directory.Exists baseDir) then
+        Directory.CreateDirectory baseDir |> ignore
+      
+      let restOfConnection = connection.Substring(m.Index + m.Length)
+      $"Data Source={absolutePath}{restOfConnection}"
+
+
 let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
   let mufs = lf.CreateLogger<VirtualFs.MigrondiUIFs>()
   let ml = lf.CreateLogger<IMigrondi>()
@@ -28,9 +50,15 @@ let getMigrondiUI(lf: ILoggerFactory, vpr: Projects.IVirtualProjectRepository) =
 
   fun (config: MigrondiConfig, rootDir: string, projectId: Guid) ->
 
+    let normalizedConfig =
+      match config.driver with
+      | MigrondiDriver.Sqlite ->
+        { config with connection = normalizeSqliteConnection projectId config.connection }
+      | _ -> config
+
     let migrondi =
       Migrondi.Core.Migrondi.MigrondiFactory(
-        config,
+        normalizedConfig,
         rootDir,
         ml,
         vfs
